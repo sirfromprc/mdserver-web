@@ -36,10 +36,14 @@ $('input[name="host_ip"]').change(function(){
 
 $('input[name="port"]').change(function(){
 	var port = $(this).val();
+	var old_port = $(this).data('port');
 	$('.btn_port').removeAttr('disabled');
 	$('.btn_port').unbind().click(function(){
 		$.post('/config/set_port','port='+port, function(rdata){
-			showMsg(rdata.msg,function(){window.location.reload();},{icon:rdata.status?1:2},2000);
+			showMsg(rdata.msg,function(){
+				window.location.href = window.location.href.replace(old_port,port);
+				// window.location.reload();
+			},{icon:rdata.status?1:2},5000);
 		},'json');
 	});
 });
@@ -71,19 +75,158 @@ $('input[name="bind_domain"]').change(function(){
 	$('.btn_bind_domain').removeAttr('disabled');
 	$('.btn_bind_domain').unbind().click(function(){
 		$.post('/config/set_panel_domain','domain='+domain, function(rdata){
-			showMsg(rdata.msg,function(){window.location.reload();},{icon:rdata.status?1:2},2000);
+			showMsg(rdata.msg,function(){
+				window.location.href = rdata.data;
+			},{icon:rdata.status?1:2},5000);
 		},'json');
 	});
 });
 
 $('input[name="bind_ssl"]').click(function(){
-	var open_ssl = $(this).prop("checked");
-	$.post('/config/set_panel_ssl',{}, function(rdata){
-		showMsg(rdata.msg,function(){window.location.reload();},{icon:rdata.status?1:2},2000);
-	},'json');
+	var panel_ssl = $(this).prop("checked");
+	$(this).prop("checked",!panel_ssl);
+
+	//开启证书
+	if (panel_ssl){
+		// <option value="1">ACME</option>
+		layer.open({
+			type:1,
+			closeBtn: 1,
+			title:"开启SSL证书",
+			area: ['600px','440px'],
+			btn: ["开启SSL证书访问"],
+			maxmin:false,
+			shadeClose: true,
+			content: '<div class="bt-form" style="padding: 25px 40px;">\
+				<div style="text-align: center;">\
+					<h3 style="font-size: 20px;color: #333;margin-left: 5px;">【开启SSL证书】保护面板访问安全</h3>\
+				</div>\
+				<ul class="help-info-text c7 pd15" style="color: #333;font-size: 14px;background: #F5F7FA;margin-top: 24px;padding: 10px 20px 10px 20px;border-radius: 2px;">\
+					<li>自签证书访问步骤：</li>\
+					<li>1. 部署SSL证书</li>\
+					<li>2. 浏览器地址栏修改为https://访问</li>\
+					<li>3. 如提醒风险（正常现象）点击【高级】或【详情】</li>\
+					<li>4.【继续访问】或【接收风险并继续】</li>\
+				</ul>\
+				<div class="pt10" style="margin-top: 20px;">\
+					<div class="line" style="font-size: 14px;">\
+						<span class="tname" style="width: 78px;">类型</span>\
+						<div class="info-r" style="margin-left: 78px;">\
+							<select class="bt-input-text mr5" name="cert_type" style="width: 440px;">\
+								<option value="0">自签证书 (推荐，浏览器会提示不安全。可忽略，请放心开启)</option>\
+							</select>\
+						</div>\
+					</div>\
+					<ul class="help-info-text c7 sslSafeTips">\
+						<li><span>开启后导致面板不能访问，可以点击查看</span></li>\
+						<li>自签证书不被浏览器信任，显示不安全是正常现象</li>\
+					</ul>\
+				</div>\
+			</div>',
+			yes: function(){
+
+				var cert_type = $('select[name=cert_type]').val();
+				$.post('/config/set_panel_local_ssl',{'cert_type':cert_type}, function(rdata){
+					// console.log(rdata);
+					var to_https = window.location.href.replace('http','https');
+					showMsg(rdata.msg,function(){
+						if (rdata.status){
+							window.location.href = to_https;
+						}
+					},{icon:rdata.status?1:2},5000);
+				},'json');
+	
+			}
+		});
+	} else { 
+		//关闭SSL
+		layer.open({
+			type:1,
+			closeBtn: 1,
+			title:"关闭SSL证书",
+			area: ['480px','280px'],
+			btn: ["确定","取消"],
+			shadeClose: true,
+			content: '<div class="bt-form" style="padding: 25px 40px;">\
+				<div class="hint_title" style="font-size: 15px;color: #111;text-align:center;">\
+					<div class="hint_con">关闭SSL极易被抓包攻击导致账号密码泄露，请勿关闭</div>\
+				</div>\
+				<div class="confirm-info-box" style="background-color: #f0f0f0;clear: both;font-size: 14px;height: 105px;line-height: 26px;padding: 20px 20px;margin-top: 20px;">\
+					<div>请手动输入【<span style="color: #fc6d26;">我要关闭</span>】，完成验证</div>\
+					<input onpaste="return false;" id="prompt_input_box" style="height: 30px;line-height: 30px;margin-top: 5px;width: 360px;color: #444;outline: none;border: 1px solid #ccc;padding: 0 5px;" type="text" value="" autocomplete="off">\
+				</div>\
+			</div>',
+			yes: function(index){
+				var val = $('#prompt_input_box').val();
+				if (val != '我要关闭'){
+					layer.msg("关闭SSL失败!");
+					return;
+				}
+
+				$.post('/config/close_panel_ssl',{}, function(rdata){
+					var to_http = window.location.href.replace('https','http');
+					showMsg(rdata.msg,function(){
+						if (rdata.status){
+							window.location.href = to_http;
+						}
+					},{icon:rdata.status?1:2},5000);
+				},'json');
+			}
+		});
+	}
+
 });
 
 /** op **/
+
+
+// VIP -- start
+function setVipInfo(){
+	layer.open({
+		type: 1,
+		area: "400px",
+		title: 'VIP登录',
+		closeBtn: 1,
+		shift: 5,
+		btn:["登录","关闭"],
+		shadeClose: false,
+		content: "<div class='bt-form pd20'>\
+				<div class='line'>\
+					<span class='tname'>用户名</span>\
+					<div class='info-r'><input class='bt-input-text' type='text' name='username' value='' style='width:85%' autocomplete='off'/></div>\
+				</div>\
+				<div class='line'>\
+					<span class='tname'>密码</span>\
+					<div class='info-r'><input class='bt-input-text' type='password' name='password' value='' style='width:85%' autocomplete='off'/></div>\
+				</div>\
+			</div>",
+		yes:function(index){
+			var pdata = {};
+
+			pdata['username'] = $('input[name="username"]').val();
+			pdata['password'] = $('input[name="password"]').val();
+
+			if (pdata['username'] == ''){
+				layer.msg('用户名不能为空!', {icon:2});
+				return false;
+			}
+
+			if (pdata['password'] == ''){
+				layer.msg('密码不能为空!', {icon:2});
+				return false;
+			}
+
+			$.post('/vip/login',{'username':pdata['username'], 'password':pdata['password']},function(rdata){
+				showMsg(rdata.msg, function(){
+					if (rdata.status){
+						layer.close(index);
+					}
+				},{icon:rdata.status?1:2},2000);
+			},'json');
+		},
+	});
+}
+// VIP -- end
 
 
 //关闭面板
@@ -285,14 +428,58 @@ function setUserName(a) {
 	})
 }
 
+function setTimezone(){
+	layer.open({
+		type: 1,
+		area: ["400px","200px"],
+		title: '设置服务器时区',
+		closeBtn: 1,
+		shift: 5,
+		shadeClose: false,
+		btn:["确定","取消","同步"],
+		content: "<div class='bt-form pd20'>\
+			<div class='line'>\
+				<span class='tname'>时区</span>\
+				<div class='info-r'>\
+					<select class='bt-input-text mr5' name='timezone' style='width: 250px;'></select>\
+				</div>\
+			</div>\
+		</div>",
+		success:function(){
+			var tbody = '';
+			$.post('/config/get_timezone_list', {}, function (rdata) {
+		        for (var i = 0; i < rdata.length; i++) {
 
-function syncDate(){
-	var loadT = layer.msg('正在同步时间...',{icon:16,time:0,shade: [0.3, '#000']});
-	$.post('/config/sync_date','',function(rdata){
-		layer.close(loadT);
-		layer.msg(rdata.msg,{icon:rdata.status?1:2});
-		setTimeout(function(){window.location.reload();},1500);
-	},'json');
+		        	if (rdata[i] == 'Asia/Shanghai'){
+		        		tbody += '<option value="'+rdata[i]+'" selected="selected">'+rdata[i]+'</option>';
+		        	} else {
+		        		tbody += '<option value="'+rdata[i]+'">'+rdata[i]+'</option>';
+		        	}
+		        	
+		        }
+		        $('select[name="timezone"]').append(tbody);
+		    },'json');
+	    },
+        yes:function(index){
+		    var loadT = layer.msg("正在设置时区...", { icon: 16, time: 0, shade: [0.3, '#000'] });
+		    var timezone = $('select[name="timezone"]').val();
+		    $.post('/config/set_timezone', { timezone: timezone }, function (rdata) {
+		    	showMsg(rdata.msg, function(){
+		    		layer.close(index);
+		    		layer.close(loadT);
+		    		location.reload();
+		    	},{ icon: rdata.status ? 1 : 2 }, 2000);
+		    },'json');
+        },
+        btn3:function(){
+        	var loadT = layer.msg('正在同步时间...',{icon:16,time:0,shade: [0.3, '#000']});
+			$.post('/config/sync_date','',function(rdata){
+				layer.close(loadT);
+				layer.msg(rdata.msg,{icon:rdata.status?1:2});
+				setTimeout(function(){window.location.reload();},1500);
+			},'json');
+        }
+	})
 }
 
 
@@ -317,12 +504,7 @@ function setPanelSSL(){
 		<input type="checkbox" id="checkSSL" /><label style="font-weight: 400;margin: 3px 5px 0px;" for="checkSSL">我已了经解详情,并愿意承担风险</label>\
 	</p>';
 	layer.confirm(msg,{title:'设置面板SSL',closeBtn:1,icon:3,area:'550px',cancel:function(){
-		if(status == 0){
-			$("#panelSSL").prop("checked",false);
-		}
-		else{
-			$("#panelSSL").prop("checked",true);
-		}
+		$("#panelSSL").prop("checked", status == 0?false:true);
 	}},function(){
 		if(window.location.protocol.indexOf('https') == -1){
 			if(!$("#checkSSL").prop('checked')){
@@ -347,31 +529,320 @@ function setPanelSSL(){
 	},function(){
 		if(status == 0){
 			$("#panelSSL").prop("checked",false);
-		}
-		else{
+		}else{
 			$("#panelSSL").prop("checked",true);
 		}
 	});
 }
 
+function setNotifyApi(tag, obj){
+	var enable = $(obj).prop("checked");
+	// console.log(tag,obj,enable);
+	$.post('/config/set_notify_enable', {'tag':tag, 'enable':enable},function(rdata){
+		showMsg(rdata.msg, function(){
+			if (rdata.status){}
+		} ,{icon:rdata.status?1:2}, 1000);
+	},'json');
+}
+
+function getTgbot(){
+	var loadT = layer.msg('正在获取TgBot信息...',{icon:16,time:0,shade: [0.3, '#000']});
+	$.post('/config/get_notify',{},function(data){
+		layer.close(loadT);
+
+		var app_token = '';
+		var chat_id = '';
+
+		if (data.status){
+			if (typeof(data['data']['tgbot']) !='undefined'){
+				app_token = data['data']['tgbot']['data']['app_token'];
+				chat_id = data['data']['tgbot']['data']['chat_id'];
+			}
+		}
+
+		layer.open({
+			type: 1,
+			area: "500px",
+			title: 'TgBot配置',
+			closeBtn: 1,
+			shift: 5,
+			btn:["确定","关闭","验证"],
+			shadeClose: false,
+			content: "<div class='bt-form pd20'>\
+					<div class='line'>\
+						<span class='tname'>APP_TOKEN</span>\
+						<div class='info-r'><input class='bt-input-text' type='text' name='app_token' value='"+app_token+"' style='width:100%'/></div>\
+					</div>\
+					<div class='line'>\
+						<span class='tname'>CHAT_ID</span>\
+						<div class='info-r'><input class='bt-input-text' type='text' name='chat_id' value='"+chat_id+"' style='width:100%' /></div>\
+					</div>\
+				</div>",
+			yes:function(index){
+				var pdata = {};
+				pdata['app_token'] = $('input[name="app_token"]').val();
+				pdata['chat_id'] = $('input[name="chat_id"]').val();
+
+				if (pdata['app_token'] == ''){
+					layer.msg('app_token不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['chat_id'] == ''){
+					layer.msg('chat_id不能为空!', {icon:2});
+					return false;
+				}
+
+				$.post('/config/set_notify',{'tag':'tgbot', 'data':JSON.stringify(pdata)},function(rdata){
+					showMsg(rdata.msg, function(){
+						if (rdata.status){
+							layer.close(index);
+						}
+					},{icon:rdata.status?1:2},2000);
+				});
+			},
+
+			btn3:function(index){
+				var pdata = {};
+				pdata['app_token'] = $('input[name="app_token"]').val();
+				pdata['chat_id'] = $('input[name="chat_id"]').val();
+
+				if (pdata['app_token'] == ''){
+					layer.msg('app_token不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['chat_id'] == ''){
+					layer.msg('chat_id不能为空!', {icon:2});
+					return false;
+				}
+
+				$.post('/config/set_notify_test',{'tag':'tgbot', 'data':JSON.stringify(pdata)},function(rdata){
+					showMsg(rdata.msg, function(){
+						if (rdata.status){
+							layer.close(index);
+						}
+					},{icon:rdata.status?1:2},2000);
+				});
+				return false;
+			}
+		});
+	});
+}
+
+function getEmailCfg(){
+	var loadT = layer.msg('正在获取邮件配置信息...',{icon:16,time:0,shade: [0.3, '#000']});
+	$.post('/config/get_notify',{},function(data){
+		layer.close(loadT);
+
+		var smtp_host = 'smtp.163.com';
+		var smtp_port = '25';
+		var username = 'admin';
+		var password = '';
+		var to_mail_addr = '';
+
+		var smtp_ssl_no = 'checked';
+		var smtp_ssl_yes = '';
+
+		if (data.status){
+			if (typeof(data['data']['email']) !='undefined'){
+				smtp_host = data['data']['email']['data']['smtp_host'];
+				smtp_port = data['data']['email']['data']['smtp_port'];
+				username = data['data']['email']['data']['username'];
+				password = data['data']['email']['data']['password'];
+				to_mail_addr = data['data']['email']['data']['to_mail_addr'];
+
+
+				var smtp_ssl = data['data']['email']['data']['smtp_ssl'];
+				if (smtp_ssl == 'ssl'){
+					smtp_ssl_no = '';
+					smtp_ssl_yes = 'checked';
+				}
+			}
+		}
+
+		layer.open({
+			type: 1,
+			area: "500px",
+			title: '邮件配置',
+			closeBtn: 1,
+			shift: 5,
+			btn:["确定","关闭","验证"],
+			shadeClose: false,
+			content: "<div class='bt-form pd20'>\
+					<div class='line'>\
+						<span class='tname'>SMTP服务器</span>\
+						<div class='info-r'><input class='bt-input-text' type='text' name='smtp_host' value='"+smtp_host+"' style='width:100%'/></div>\
+					</div>\
+					<div class='line'>\
+						<span class='tname'>SMTP安全</span>\
+						<div class='info-r checkbox'>\
+							<label><input name='smtp_ssl' type='radio' value='' style='margin-right: 4px;' "+smtp_ssl_no+">None</label>\
+							<label><input name='smtp_ssl' type='radio' value='ssl' style='margin-right: 4px;' "+smtp_ssl_yes+">SSL</label>\
+						</div>\
+					</div>\
+					<div class='line'>\
+						<span class='tname'>SMTP端口</span>\
+						<div class='info-r'><input class='bt-input-text' type='text' name='smtp_port' value='"+smtp_port+"' style='width:100%' /></div>\
+					</div>\
+					<div class='line'>\
+						<span class='tname'>用户名</span>\
+						<div class='info-r'><input class='bt-input-text' type='text' name='username' value='"+username+"' style='width:100%' autocomplete='off'/></div>\
+					</div>\
+					<div class='line'>\
+						<span class='tname'>授权码</span>\
+						<div class='info-r'><input class='bt-input-text' type='password' name='password' value='"+password+"' style='width:100%' autocomplete='off'/></div>\
+					</div>\
+					<div class='line'>\
+						<span class='tname'>发送地址</span>\
+						<div class='info-r'><input class='bt-input-text' type='text' name='to_mail_addr' value='"+to_mail_addr+"' style='width:100%' autocomplete='off'/></div>\
+					</div>\
+					<div class='line'>\
+						<span class='tname'>验证测试</span>\
+						<div class='info-r'>\
+							<textarea class='bt-input-text' name='mail_test' style='width:100%; height: 80px; line-height: 20px; padding: 5px 8px;'>验证测试</textarea></div>\
+					</div>\
+				</div>",
+			yes:function(index){
+				var pdata = {};
+				pdata['smtp_host'] = $('input[name="smtp_host"]').val();
+				pdata['smtp_port'] = $('input[name="smtp_port"]').val();
+				pdata['smtp_ssl'] = $('input[name="smtp_ssl"]:checked').val();
+				pdata['username'] = $('input[name="username"]').val();
+				pdata['password'] = $('input[name="password"]').val();
+				pdata['to_mail_addr'] = $('input[name="to_mail_addr"]').val();
+
+				if (pdata['smtp_host'] == ''){
+					layer.msg('SMTP服务器不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['smtp_port'] == ''){
+					layer.msg('SMTP端口不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['username'] == ''){
+					layer.msg('用户名不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['password'] == ''){
+					layer.msg('授权码不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['to_mail_addr'] == ''){
+					layer.msg('发送地址不能为空!', {icon:2});
+					return false;
+				}
+
+				$.post('/config/set_notify',{'tag':'email', 'data':JSON.stringify(pdata)},function(rdata){
+					showMsg(rdata.msg, function(){
+						if (rdata.status){
+							layer.close(index);
+						}
+					},{icon:rdata.status?1:2},2000);
+				});
+			},
+
+			btn3:function(index){
+				var pdata = {};
+				pdata['smtp_host'] = $('input[name="smtp_host"]').val();
+				pdata['smtp_port'] = $('input[name="smtp_port"]').val();
+				pdata['smtp_ssl'] = $('input[name="smtp_ssl"]:checked').val();
+				pdata['username'] = $('input[name="username"]').val();
+				pdata['password'] = $('input[name="password"]').val();
+				pdata['to_mail_addr'] = $('input[name="to_mail_addr"]').val();
+				pdata['mail_test'] = $('textarea[name="mail_test"]').val();
+
+
+				if (pdata['smtp_host'] == ''){
+					layer.msg('SMTP服务器不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['smtp_port'] == ''){
+					layer.msg('SMTP端口不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['username'] == ''){
+					layer.msg('用户名不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['password'] == ''){
+					layer.msg('授权码不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['to_mail_addr'] == ''){
+					layer.msg('发送地址不能为空!', {icon:2});
+					return false;
+				}
+
+				if (pdata['mail_test'] == ''){
+					layer.msg('验证测试不能为空!', {icon:2});
+					return false;
+				}
+				$.post('/config/set_notify_test',{'tag':'email', 'data':JSON.stringify(pdata)},function(rdata){
+					showMsg(rdata.msg, function(){
+						if (rdata.status){
+							layer.close(index);
+						}
+					},{icon:rdata.status?1:2},2000);
+				});
+				return false;
+			}
+		});
+	});
+}
 
 function getPanelSSL(){
 	var loadT = layer.msg('正在获取证书信息...',{icon:16,time:0,shade: [0.3, '#000']});
 	$.post('/config/get_panel_ssl',{},function(cert){
 		layer.close(loadT);
 
+		// console.log(cert);
+		var choose = cert['choose'];
+		var choose_local = '';
+		var choose_nginx = '';
+
+		if (choose == 'local'){
+			cert = cert['local'];
+			choose_local = 'selected="selected"';
+		} else if (choose == 'nginx') {
+			cert = cert['nginx'];
+			choose_nginx = 'selected="selected"';
+		} else {
+			cert = cert['local'];
+		}
 
 		var cert_data = '';
+
+		// <div class='state_item'>\
+		// 	<span>强制HTTPS：</span>\
+		// 	<span class='switch'>\
+		// 		<input class='btswitch btswitch-ios' id='toHttps' type='checkbox' "+cert['is_https']+">\
+		// 		<label class='btswitch-btn set_panel_http_to_https' for='toHttps'></label>\
+		// 	</span>\
+		// </div>\
 		if (cert['info']){
 			cert_data = "<div class='ssl_state_info'><div class='state_info_flex'>\
-				<div class='state_item'><span>证书品牌：</span><span class='ellipsis_text ssl_issue'>"+cert['info']['issuer']+"</span></div>\
-				<div class='state_item'><span>到期时间：</span><span class='btlink ssl_endtime'>剩余"+cert['info']['endtime']+"天到期</span></div>\
+				<div class='state_item'><span>证书品牌：</span>\
+				<span class='ellipsis_text ssl_issue'>"+cert['info']['issuer']+"</span></div>\
+				<div class='state_item'><span>到期时间：</span>\
+				<span class='btlink ssl_endtime'>剩余"+cert['info']['endtime']+"天到期</span></div>\
 			</div>\
 			<div class='state_info_flex'>\
-				<div class='state_item'><span>认证域名：</span><span class='ellipsis_text ssl_subject'>"+cert['info']['subject']+"</span></div>\
+				<div class='state_item'><span>认证域名：</span>\
+				<span class='ellipsis_text ssl_subject'>"+cert['info']['subject']+"</span></div>\
 			</div></div>";
 		}
 
+		// <button class="btn btn-success btn-sm apply-lets-ssl">申请ACME证书</button>\
+		// <option value="nginx" '+choose_nginx+'>OpenResty</option>\
 		var certBody = '<div class="tab-con">\
 			<div class="myKeyCon ptb15">\
 				'+cert_data+'\
@@ -385,7 +856,10 @@ function getPanelSSL(){
 				</div>\
 				<div class="ssl-btn pull-left mtb15" style="width:100%">\
 					<button class="btn btn-success btn-sm save-panel-ssl">保存</button>\
-					<button class="btn btn-success btn-sm apply-lets-ssl">申请Lets证书</button>\
+					<button class="btn btn-success btn-sm del-panel-ssl">删除</button>\
+					<select class="bt-input-text" name="choose" style="width:100px;">\
+						<option value="local" '+choose_local+'>本地</option>\
+					</select>\
 				</div>\
 			</div>\
 			<ul class="help-info-text c7 pull-left">\
@@ -403,41 +877,120 @@ function getPanelSSL(){
 			content:certBody,
 			success:function(layero, layer_id){
 
+
 				//保存SSL
 				$('.save-panel-ssl').click(function(){
 					var data = {
 						privateKey:$("#key").val(),
 						certPem:$("#csr").val()
 					}
-					var loadT = layer.msg('正在安装并设置SSL组件,这需要几分钟时间...',{icon:16,time:0,shade: [0.3, '#000']});
-					$.post('/config/save_panel_ssl',data,function(rdata){
-						layer.close(loadT);
-						if(rdata.status){
-							layer.closeAll();
-						}
-						layer.msg(rdata.msg,{icon:rdata.status?1:2});
-					},'json');
-				});
 
-				//申请Lets证书
-				$('.apply-lets-ssl').click(function(){
-					showSpeedWindow('正在申请...', 'site.get_let_logs', function(layers,index){
-						$.post('/config/apply_panel_let_ssl',{},function(rdata){
+					layer.confirm('选择保存面板SSL方式?', 
+					{
+						title:'提示', 
+						shade:0.001,
+						btn: ['本地SSL', '取消'],//'OpenResty'
+						btn3:function(){
+							data['choose'] = 'nginx';
+							var loadT = layer.msg('正在安装并设置SSL组件,这需要几分钟时间...',{icon:16,time:0,shade: [0.3, '#000']});
+							$.post('/config/save_panel_ssl',data,function(rdata){
+								layer.close(loadT);
+								if(rdata.status){
+									layer.closeAll();
+								}
+								layer.msg(rdata.msg,{icon:rdata.status?1:2});
+							},'json');
+						},
+					},
+					function(index) {
+						data['choose'] = 'local';
+				    	var loadT = layer.msg('正在安装并设置SSL组件,这需要几分钟时间...',{icon:16,time:0,shade: [0.3, '#000']});
+						$.post('/config/save_panel_ssl',data,function(rdata){
 							layer.close(loadT);
 							if(rdata.status){
-								layer.close(index);
-								var tdata = rdata['data'];
-								$('.ssl_issue').text(tdata['info']['issuer']);
-								$('.ssl_endtime').text("剩余"+tdata['info']['endtime']+"天到期");
-								$('.ssl_subject').text(tdata['info']['subject']);
-
-								$('textarea[name="key"]').val(tdata['info']['privateKey']);
-								$('textarea[name="csr"]').val(tdata['info']['certPem']);
+								layer.closeAll();
 							}
 							layer.msg(rdata.msg,{icon:rdata.status?1:2});
 						},'json');
-					});
+				    },
+				    function(index) {
+				        layer.close(index);
+				    });
 				});
+
+				//删除SSL
+				$('.del-panel-ssl').click(function(){
+
+					layer.confirm('选择删除面板SSL方式?', 
+					{
+						title:'提示', 
+						shade:0.001,
+						btn: ['本地SSL', '取消'],//, 'OpenResty'
+						btn3:function(){
+							var data = {};
+							data['choose'] = 'nginx';
+							var loadT = layer.msg('正在删除面板SSL【nginx】...',{icon:16,time:0,shade: [0.3, '#000']});
+							$.post('/config/del_panel_ssl',data,function(rdata){
+								layer.close(loadT);
+								if(rdata.status){
+									layer.closeAll();
+								}
+								layer.msg(rdata.msg,{icon:rdata.status?1:2});
+							},'json');
+						},
+					},
+					function(index) {
+						var data = {};
+						data['choose'] = 'local';
+						var loadT = layer.msg('正在删除面板SSL【本地】...',{icon:16,time:0,shade: [0.3, '#000']});
+						$.post('/config/del_panel_ssl',data,function(rdata){
+							console.log(rdata);
+							layer.close(loadT);
+							showMsg(rdata.msg, function(){
+								if(rdata.status){
+									location.href = rdata.data;
+								}
+							},{icon:rdata.status?1:2},3000);
+						},'json');
+				    },
+				    function(index) {
+				        layer.close(index);
+				    });
+
+					
+				});
+
+				// // 设置面板SSL的Http
+				// $('.set_panel_http_to_https').click(function(){
+				// 	var https = $('#toHttps').prop('checked');
+				// 	$.post('/config/set_panel_http_to_https',{'https':https},function(rdata){
+				// 		layer.close(loadT);
+				// 		if(rdata.status){
+				// 			layer.closeAll();
+				// 		}
+				// 		layer.msg(rdata.msg,{icon:rdata.status?1:2});
+				// 	},'json');
+				// });
+
+				// //申请Lets证书
+				// $('.apply-lets-ssl').click(function(){
+				// 	showSpeedWindow('正在申请...', 'site.get_let_logs', function(layers,index){
+				// 		$.post('/config/apply_panel_acme_ssl',{},function(rdata){
+				// 			layer.close(loadT);
+				// 			if(rdata.status){
+				// 				layer.close(index);
+				// 				var tdata = rdata['data'];
+				// 				$('.ssl_issue').text(tdata['info']['issuer']);
+				// 				$('.ssl_endtime').text("剩余"+tdata['info']['endtime']+"天到期");
+				// 				$('.ssl_subject').text(tdata['info']['subject']);
+
+				// 				$('textarea[name="key"]').val(tdata['info']['privateKey']);
+				// 				$('textarea[name="csr"]').val(tdata['info']['certPem']);
+				// 			}
+				// 			layer.msg(rdata.msg,{icon:rdata.status?1:2});
+				// 		},'json');
+				// 	});
+				// });
 			}
 		});
 	},'json');
@@ -476,14 +1029,14 @@ function getTempAccessLogs(id){
 		closeBtn:1,
 		shift: 0,
 		type: 1,
-		content: "<div class=\"pd20\">\
-					<button class=\"btn btn-success btn-sm refresh_log\">刷新日志</button>\
-					<div class=\"divtable mt10\">\
-						<table class=\"table table-hover\">\
+		content: "<div class='pd20'>\
+					<button class='btn btn-success btn-sm refresh_log'>刷新日志</button>\
+					<div class='divtable mt10'>\
+						<table class='table table-hover'>\
 							<thead>\
 								<tr><th>操作类型</th><th>操作时间</th><th>日志</th></tr>\
 							</thead>\
-							<tbody id=\"logs_list\"></tbody>\
+							<tbody id='logs_list'></tbody>\
 						</table>\
 					</div>\
 				</div>",
@@ -550,6 +1103,61 @@ function setTempAccessReq(page){
 	},'json');
 }
 
+function setStatusCode(o){
+	var code = $(o).data('code');
+    layer.open({
+        type: 1,
+        area: ['420px', '220px'],
+        title: "设置未认证时的响应状态",
+        closeBtn: 1,
+        shift: 5,
+        btn:['提交','关闭'],
+        shadeClose: false,
+        content: '<div class="bt-form bt-form pd20">\
+                    <div class="line">\
+                        <span class="tname">相应状态</span>\
+                        <div class="info-r">\
+                            <select class="bt-input-text mr5" name="status_code" style="width: 250px;"></select>\
+                        </div>\
+                    </div>\
+                    <ul class="help-info-text c7"><li style="color: red;">用于未登录且未正确输入安全入口时的响应,用于隐藏面板特征</li></ul>\
+                </div>',
+        success:function(){
+        	var msg_list = [
+        		{'code':'0','msg':'默认-安全入口错误提示'},
+        		{'code':'403','msg':'403-拒绝访问'},
+        		{'code':'404','msg':'404-页面不存在'},
+        		{'code':'416','msg':'416-无效的请求'},
+        		{'code':'408','msg':'408-客户端超时'},
+        		{'code':'400','msg':'400-客户端请求错误'},
+        		{'code':'401','msg':'401-未授权访问'},
+        	];
+
+        	var tbody = '';
+        	for(i in msg_list){
+        		if (msg_list[i]['code'] == code){
+        			tbody += '<option value="'+msg_list[i]['code']+'" selected>'+msg_list[i]['msg']+'</option>';
+        		} else{
+        			tbody += '<option value="'+msg_list[i]['code']+'">'+msg_list[i]['msg']+'</option>';
+        		}
+        		
+        	}
+        	$('select[name="status_code"]').append(tbody);
+        },
+        yes:function(index){
+		    var loadT = layer.msg("正在设置未认证时的响应状态", { icon: 16, time: 0, shade: [0.3, '#000'] });
+		    var status_code = $('select[name="status_code"]').val();
+		    $.post('/config/set_status_code', { status_code: status_code }, function (rdata) {
+		    	showMsg(rdata.msg, function(){
+		    		layer.close(index);
+		    		layer.close(loadT);
+		    		location.reload();
+		    	},{ icon: rdata.status ? 1 : 2 }, 2000);
+		    },'json');
+        }
+    });
+}
+
 function setTempAccess(){
 	layer.open({
 		area: ['700px', '250px'],
@@ -558,7 +1166,7 @@ function setTempAccess(){
 		shift: 0,
 		type: 1,
 		content: "<div class=\"login_view_table pd20\">\
-					<button class=\"btn btn-success btn-sm create_temp_login\" >临时访问授权</button>\
+					<button class=\"btn btn-success btn-sm create_temp_login\">临时访问授权</button>\
 					<div class=\"divtable mt10\">\
 						<table class=\"table table-hover\">\
 							<thead>\
@@ -587,15 +1195,15 @@ function setTempAccess(){
 							title: '创建临时授权',
 							shift: 0,
 							type: 1,
-							content: "<div class=\"bt-form create_temp_view pd15\">\
-									<div class=\"line\">\
-										<span class=\"tname\">临时授权地址</span>\
+							content: "<div class='bt-form create_temp_view pd15'>\
+									<div class='line'>\
+										<span class='tname'>临时授权地址</span>\
 										<div>\
-											<textarea id=\"temp_link\" class=\"bt-input-text mr20\" style=\"margin: 0px;width: 500px;height: 50px;line-height: 19px;\"></textarea>\
+											<textarea id='temp_link' class='bt-input-text mr20' style='margin: 0px;width: 500px;height: 50px;line-height: 19px;'></textarea>\
 										</div>\
 									</div>\
-									<div class=\"line\"><button type=\"submit\" class=\"btn btn-success btn-sm btn-copy-temp-link\" data-clipboard-text=\"\">复制地址</button></div>\
-									<ul class=\"help-info-text c7 ptb15\">\
+									<div class='line'><button type='submit' class='btn btn-success btn-sm btn-copy-temp-link' data-clipboard-text=''>复制地址</button></div>\
+									<ul class='help-info-text c7 ptb15'>\
 										<li>临时授权生成后1小时内使用有效，为一次性授权，使用后立即失效</li>\
 										<li>使用临时授权登录面板后1小时内拥有面板所有权限，请勿在公共场合发布临时授权连接</li>\
 										<li>授权连接信息仅在此处显示一次，若在使用前忘记，请重新生成</li>\
@@ -616,6 +1224,64 @@ function setTempAccess(){
 			});
 		}
 	});
+}
+
+//二次验证
+function setAuthBind(){
+	$.post('/config/get_auth_secret', {}, function(rdata){
+		console.log(rdata);
+		var tip = layer.open({
+			area: ['500px', '355px'],
+			title: '二次验证设置',
+			closeBtn:1,
+			shift: 0,
+			type: 1,
+			content: '<div class="bt-form pd20">\
+		<div class="line">\
+			<span class="tname">绑定密钥</span>\
+			<div class="info-r">\
+				<input class="bt-input-text mr5" name="secret" type="text" style="width: 310px;" disabled>\
+				<button class="btn btn-success btn-xs reset_secret" style="margin-left: -50px;">重置</button>\
+			</div>\
+		</div>\
+		<div class="line">\
+			<span class="tname" style="width: 90px; overflow: initial; height: 20px; line-height: 20px;">二维码</span>\
+			<div class="info-r"><div class="qrcode"></div></div>\
+		</div>\
+		<ul class="help-info-text c7">\
+		</ul>\
+	</div>',
+			success:function(layero,index){
+
+				$('input[name="secret"]').val(rdata.data['secret']);
+				$('.qrcode').qrcode({ text: rdata.data['url']});
+
+				$('.reset_secret').click(function(){
+					layer.confirm('您确定要重置当前密钥吗？<br/><span style="color: red; ">重置密钥后，已关联密钥产品，将失效，请重新添加新密钥至产品。</span>',{title:'重置密钥',closeBtn:2,icon:13,cancel:function(){
+					}}, function() {
+						$.post('/config/get_auth_secret', {'reset':"1"},function(rdata){
+							showMsg("接口密钥已生成，重置密钥后，已关联密钥产品，将失效，请重新添加新密钥至产品。", function(){
+								$('input[name="secret"]').val(rdata.data['secret']);
+								$('.qrcode').html('').qrcode({ text: rdata.data['url']});
+							} ,{icon:1}, 2000);
+						},'json');
+					});
+				});
+			},
+		});
+
+	},'json');
+}
+
+function setAuthSecretApi(){
+	var cfg_panel_auth = $('#cfg_panel_auth').prop("checked");
+	$.post('/config/set_auth_secret', {'op_type':"2"},function(rdata){
+		showMsg(rdata.msg, function(){
+			if (rdata.data == 1){
+				setAuthBind();
+			}
+		} ,{icon:rdata.status?1:2}, 1000);
+	},'json');
 }
 
 function setBasicAuthTip(callback){

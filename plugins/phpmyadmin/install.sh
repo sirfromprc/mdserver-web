@@ -1,5 +1,5 @@
 #!/bin/bash
-PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH
 
 curPath=`pwd`
@@ -47,7 +47,8 @@ Install_phpmyadmin()
 
 	mkdir -p ${serverPath}/phpmyadmin
 	mkdir -p ${serverPath}/source/phpmyadmin
-
+	echo "${1}" > ${serverPath}/phpmyadmin/version.pl
+	
 	VER=$1
 	
 	FDIR=phpMyAdmin-${VER}-all-languages
@@ -65,10 +66,9 @@ Install_phpmyadmin()
 
 	cp -r $serverPath/source/phpmyadmin/$FDIR $serverPath/phpmyadmin/
 	cd $serverPath/phpmyadmin/ && mv $FDIR phpmyadmin
-
-
-	echo "${1}" > ${serverPath}/phpmyadmin/version.pl
-	echo '安装完成' > $install_tmp
+	rm -rf $serverPath/source/phpmyadmin/$FDIR
+	
+	echo '安装完成'
 
 	cd ${rootPath} && python3 ${rootPath}/plugins/phpmyadmin/index.py start
 		
@@ -79,7 +79,7 @@ Uninstall_phpmyadmin()
 	cd ${rootPath} && python3 ${rootPath}/plugins/phpmyadmin/index.py stop
 	
 	rm -rf ${serverPath}/phpmyadmin
-	echo '卸载完成' > $install_tmp
+	echo '卸载完成'
 }
 
 action=$1

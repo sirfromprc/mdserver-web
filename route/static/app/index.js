@@ -1,34 +1,3 @@
-$(function() {
-    $(".mem-release").hover(function() {
-        $(this).addClass("shine_green");
-        if (!($(this).hasClass("mem-action"))) {
-            $(this).find(".mem-re-min").hide();
-            $(this).find(".mask").css({ "color": "#d2edd8" });
-            $(this).find(".mem-re-con").css({ "display": "block" });
-            $(this).find(".mem-re-con").animate({ "top": "0", opacity: 1 });
-            $("#memory").text(lan.index.memre);
-        }
-    }, function() {
-        $(this).removeClass("shine_green");
-        $(this).find(".mask").css({ "color": "#20a53a" });
-        $(this).find(".mem-re-con").css({ "top": "15px", opacity: 1, "display": "none" });
-        $("#memory").text(getCookie("mem-before"));
-        $(this).find(".mem-re-min").hide();
-    }).click(function() {
-        $(this).find(".mem-re-min").hide();
-        if (!($(this).hasClass("mem-action"))) {
-            reMemory();
-            var btlen = $(".mem-release").find(".mask span").text();
-            $(this).addClass("mem-action");
-            $(this).find(".mask").css({ "color": "#20a53a" });
-            $(this).find(".mem-re-con").animate({ "top": "-400px", opacity: 0 });
-            $(this).find(".pie_right .right").css({ "transform": "rotate(3deg)" });
-            for (var i = 0; i < btlen; i++) {
-                setTimeout("rocket(" + btlen + "," + i + ")", i * 30);
-            }
-        }
-    });
-});
 //获取负载
 function getLoad(data) {
     $("#LoadList .mask").html("<span id='Load' style='font-size:14px'>获取中..</span>");
@@ -63,7 +32,7 @@ function getLoad(data) {
 }
 
 $('#LoadList .circle').click(function() {
-    getNet();
+    // getNet();
 });
 
 $('#LoadList .mask').hover(function() {
@@ -80,22 +49,20 @@ $('#LoadList .mask').hover(function() {
 
 
 function showCpuTips(rdata){
-    $('#cpuChart .mask').unbind();
-    $('#cpuChart .mask').hover(function() {
+    $('#cpuChart .mask').unbind().hover(function() {
         var cpuText = '';
-
         if (rdata.cpu[2].length == 1){
             var cpuUse = parseFloat(rdata.cpu[2][0] == 0 ? 0 : rdata.cpu[2][0]).toFixed(1);
-            cpuText += 'CPU-1：' + cpuUse + '%'
-        } else{
+            cpuText += 'CPU-1：' + cpuUse + '%';
+        } else {
             for (var i = 1; i < rdata.cpu[2].length + 1; i++) {
-              var cpuUse = parseFloat(rdata.cpu[2][i - 1] == 0 ? 0 : rdata.cpu[2][i - 1]).toFixed(1);
-              if (i % 2 != 0) {
-                cpuText += 'CPU-' + i + '：' + cpuUse + '%&nbsp;|&nbsp;'
-              } else {
-                cpuText += 'CPU-' + i + '：' + cpuUse + '%'
-                cpuText += '\n'
-              }
+                var cpuUse = parseFloat(rdata.cpu[2][i - 1] == 0 ? 0 : rdata.cpu[2][i - 1]).toFixed(1);
+                if (i % 2 != 0) {
+                    cpuText += 'CPU-' + i + '：' + cpuUse + '%&nbsp;|&nbsp;';
+                } else {
+                    cpuText += 'CPU-' + i + '：' + cpuUse + '%';
+                    cpuText += '\n';
+                }
             } 
         }
         layer.tips(rdata.cpu[3] + "</br>" + rdata.cpu[5] + "个物理CPU，" + (rdata.cpu[4]) + "个物理核心，" + rdata.cpu[1] + "个逻辑核心</br>" + cpuText, this, { time: 0, tips: [1, '#999'] });
@@ -109,6 +76,7 @@ function rocket(sum, m) {
     var n = sum - m;
     $(".mem-release").find(".mask span").text(n);
 }
+
 //释放内存
 function reMemory() {
     setTimeout(function() {
@@ -199,27 +167,34 @@ function clearSystem() {
 }
 
 function setMemImg(info){
-    setCookie("memRealUsed", parseInt(info.memRealUsed));
-    $("#memory").html(parseInt(info.memRealUsed) + '/' + parseInt(info.memTotal) + ' (MB)');
-    setCookie("mem-before", $("#memory").text());
-    if (!getCookie('memSize')) setCookie('memSize', parseInt(info.memTotal));
+
+    var memRealUsed = toSize(info.memRealUsed);
+    var memTotal = toSize(info.memTotal);
+
+    var memRealUsedVal = memRealUsed.split(' ')[0];
+    var memTotalVal = memTotal.split(' ')[0];
+    var unit = memTotal.split(' ')[1];
+
+    var mem_txt = memRealUsedVal + '/' + memTotalVal + ' ('+ unit +')';
+    setCookie("mem-before", mem_txt);
+    $("#memory").html(mem_txt);
+
     var memPre = Math.floor(info.memRealUsed / (info.memTotal / 100));
     $("#left").html(memPre);
     setcolor(memPre, "#left", 75, 90, 95);
-    $("#state").html(info.cpuRealUsed);
-    setcolor(memPre, "#state", 30, 70, 90);
-    setImg();
+
+    var memFree = info.memTotal - info.memRealUsed;
+    if (memFree/(1024*1024) < 64) {
+        $("#messageError").show();
+        $("#messageError").append('<p><span class="glyphicon glyphicon-alert" style="color: #ff4040; margin-right: 10px;">当前可用物理内存小于64M，这可能导致MySQL自动停止，站点502等错误，请尝试释放内存！</span></p>')
+    }
 }
 
 function getInfo() {
     $.get("/system/system_total", function(info) {
-        setCookie("memRealUsed", parseInt(info.memRealUsed));
-        $("#memory").html(parseInt(info.memRealUsed) + '/' + parseInt(info.memTotal) + ' (MB)');
-        setCookie("mem-before", $("#memory").text());
-        if (!getCookie('memSize')) setCookie('memSize', parseInt(info.memTotal));
-        var memPre = Math.floor(info.memRealUsed / (info.memTotal / 100));
-        $("#left").html(memPre);
-        setcolor(memPre, "#left", 75, 90, 95);
+
+        setMemImg(info);
+
         $("#info").html(info.system);
         $("#running").html(info.time);
         var _system = info.system;
@@ -240,13 +215,8 @@ function getInfo() {
         }
         $("#core").html(info.cpuNum + ' 核心');
         $("#state").html(info.cpuRealUsed);
-        setcolor(memPre, "#state", 30, 70, 90);
-        var memFree = info.memTotal - info.memRealUsed;
-
-        if (memFree < 64) {
-            $("#messageError").show();
-            $("#messageError").append('<p><span class="glyphicon glyphicon-alert" style="color: #ff4040; margin-right: 10px;">' + lan.index.mem_warning + '</span> </p>')
-        }
+        setcolor(info.cpuRealUsed, "#state", 30, 70, 90);
+       
 
         // if (info.isuser > 0) {
         //     $("#messageError").show();
@@ -280,9 +250,12 @@ function setcolor(pre, s, s1, s2, s3) {
 function getNet() {
     var up, down;
     $.get("/system/network", function(net) {
+
+        console.log(net);
+
         $("#InterfaceSpeed").html(lan.index.interfacespeed + "： 1.0Gbps");
-        $("#upSpeed").html(net.up + ' KB');
-        $("#downSpeed").html(net.down + ' KB');
+        $("#upSpeed").html(toSize(net.up));
+        $("#downSpeed").html(toSize(net.down));
         $("#downAll").html(toSize(net.downTotal));
         $("#downAll").attr('title', lan.index.package + ':' + net.downPackets)
         $("#upAll").html(toSize(net.upTotal));
@@ -292,18 +265,23 @@ function getNet() {
         setcolor(net.cpu[0], "#state", 30, 70, 90);
         setCookie("upNet", net.up);
         setCookie("downNet", net.down);
-        getLoad(net.load);
-    
-        // setMemImg(net.mem);
-        setImg();
 
+        //负载
+        getLoad(net.load);
+
+        //内存
+        setMemImg(net.mem);
+
+        //绑定hover事件
+        setImg();
         showCpuTips(net);
+
     },'json');
 }
 
-//网络Io
+//网络IO
 function netImg() {
-    var myChartNetwork = echarts.init(document.getElementById('netImg'));
+    
     var xData = [];
     var yData = [];
     var zData = [];
@@ -333,10 +311,27 @@ function netImg() {
         return ts(h) + ':' + ts(mm) + ':' + ts(s);
     }
 
+    var default_unit = 'KB/s';
     function addData(shift) {
         xData.push(getTime());
-        yData.push(getCookie("upNet"));
-        zData.push(getCookie("downNet"));
+
+        if (getCookie("upNet") > getCookie("downNet") ){
+            tmp = getCookie("upNet");
+        } else {
+            tmp = getCookie("downNet");
+        }
+        var tmpSize = toSize(tmp);
+        default_unit = tmpSize.split(' ')[1] + '/s';
+
+
+        var upNetTmp = toSize(getCookie("upNet"));
+        var downNetTmp = toSize(getCookie("downNet"));
+        
+        var upNetTmpSize = upNetTmp.split(' ')[0];
+        var downNetTmp = downNetTmp.split(' ')[0];
+        
+        yData.push(upNetTmpSize);
+        zData.push(downNetTmp);
         if (shift) {
             xData.shift();
             yData.shift();
@@ -352,12 +347,12 @@ function netImg() {
     // 指定图表的配置项和数据
     var option = {
         title: {
-            text: lan.index.interface_net,
+            text: "接口流量实时",
             left: 'center',
             textStyle: {
                 color: '#888888',
                 fontStyle: 'normal',
-                fontFamily: lan.index.net_font,
+                fontFamily: "宋体",
                 fontSize: 16,
             }
         },
@@ -379,20 +374,16 @@ function netImg() {
             }
         },
         yAxis: {
-            name: lan.index.unit + 'KB/s',
+            name:  '单位 '+ default_unit,
             splitLine: {
-                lineStyle: {
-                    color: "#eee"
-                }
+                lineStyle: { color: "#eee" }
             },
             axisLine: {
-                lineStyle: {
-                    color: "#666"
-                }
+                lineStyle: { color: "#666" }
             }
         },
         series: [{
-            name: lan.index.net_up,
+            name: '上行',
             type: 'line',
             data: yData,
             smooth: true,
@@ -420,8 +411,9 @@ function netImg() {
                     width: 1
                 }
             }
-        }, {
-            name: lan.index.net_down,
+        },
+        {
+            name: '下行',
             type: 'line',
             data: zData,
             smooth: true,
@@ -432,29 +424,36 @@ function netImg() {
                 normal: {
                     color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{
                         offset: 0,
-                        color: 'rgba(30, 144, 255,0.5)'
+                        color: 'rgba(30, 144, 255,0.5)',
                     }, {
                         offset: 1,
-                        color: 'rgba(30, 144, 255,0.8)'
+                        color: 'rgba(30, 144, 255,0.8)',
                     }], false)
                 }
             },
             itemStyle: {
                 normal: {
-                    color: '#52a9ff'
+                    color: '#52a9ff',
                 }
             },
             lineStyle: {
                 normal: {
-                    width: 1
+                    width: 1,
                 }
             }
         }]
     };
+
+    var echartsNetImg = echarts.init(document.getElementById('netImg'));
     setInterval(function() {
         getNet();
         addData(true);
-        myChartNetwork.setOption({
+        echartsNetImg.setOption({
+            yAxis: {
+                name:  '单位 '+ default_unit,
+                splitLine: { lineStyle: { color: "#eee" } },
+                axisLine: { lineStyle: { color: "#666" } }
+            },
             xAxis: {
                 data: xData
             },
@@ -467,10 +466,11 @@ function netImg() {
             }]
         });
     }, 3000);
+
     // 使用刚指定的配置项和数据显示图表。
-    myChartNetwork.setOption(option);
+    echartsNetImg.setOption(option);
     window.addEventListener("resize", function() {
-        myChartNetwork.resize();
+        echartsNetImg.resize();
     });
 }
 
@@ -487,8 +487,7 @@ function setImg() {
         };
     });
 
-    $('.diskbox .mask').unbind();
-    $('.diskbox .mask').hover(function() {
+    $('.diskbox .mask').unbind().hover(function() {
         layer.closeAll('tips');
         var that = this;
         var conterError = $(this).attr("data");
@@ -609,9 +608,11 @@ function reBoot() {
         area: '330px',
         closeBtn: 1,
         shadeClose: false,
-        content: '<div class="rebt-con"><div class="rebt-li"><a data-id="server" href="javascript:;">重启服务器</a></div><div class="rebt-li"><a data-id="panel" href="javascript:;">重启面板</a></div></div>'
+        content: '<div class="rebt-con">\
+                <div class="rebt-li"><a data-id="server" href="javascript:;">重启服务器</a></div>\
+                <div class="rebt-li"><a data-id="panel" href="javascript:;">重启面板</a></div>\
+            </div>'
     });
-
 
     $('.rebt-con a').click(function () {
         var type = $(this).attr('data-id');
@@ -737,6 +738,7 @@ function setSafeHide() {
     setCookie('safeMsg', '1');
     $("#safeMsg").remove();
 }
+
 //查看报告
 function showDanger(num, port) {
     var atxt = "因未使用安全隔离登录，所有IP都可以尝试连接，存在较高风险，请立即处理。";
@@ -750,17 +752,18 @@ function showDanger(num, port) {
         closeBtn: 1,
         shift: 5,
         content: '<div class="pd20">\
-				<table class="f14 showDanger"><tbody>\
-				<tr><td class="text-right" width="150">风险类型：</td><td class="f16" style="color:red">暴力破解 <a href="https://www.bt.cn/bbs/thread-9562-1-1.html" class="btlink f14" style="margin-left:10px" target="_blank">说明</a></td></tr>\
-				<tr><td class="text-right">累计遭遇攻击总数：</td><td class="f16" style="color:red">' + num + ' <a href="javascript:showDangerIP();" class="btlink f14" style="margin-left:10px">详细</a><span class="c9 f12" style="margin-left:10px">（数据直接来源本服务器日志）</span></td></tr>\
-				<tr><td class="text-right">风险等级：</td><td class="f16" style="color:red">较高风险</td></tr>\
-				<tr><td class="text-right" style="vertical-align:top">风险描述：</td><td style="line-height:20px">' + atxt + '</td></tr>\
-				<tr><td class="text-right" style="vertical-align:top">可参考解决方案：</td><td><p style="margin-bottom:8px">方案一：修改SSH默认端口，修改SSH验证方式为数字证书，清除近期登陆日志。</p><p>方案二：购买宝塔企业运维版，一键部署安全隔离服务，高效且方便。</p></td></tr>\
-				</tbody></table>\
-				<div class="mtb20 text-center"><a href="https://www.bt.cn/admin/index.html" target="_blank" class="btn btn-success">立即部署隔离防护</a></div>\
-				</div>'
+                <table class="f14 showDanger">\
+                    <tbody>\
+                    <tr><td class="text-right" width="150">风险类型：</td><td class="f16" style="color:red">暴力破解 <a href="https://www.bt.cn/bbs/thread-9562-1-1.html" class="btlink f14" style="margin-left:10px" target="_blank">说明</a></td></tr>\
+                    <tr><td class="text-right">累计遭遇攻击总数：</td><td class="f16" style="color:red">' + num + ' <a href="javascript:showDangerIP();" class="btlink f14" style="margin-left:10px">详细</a><span class="c9 f12" style="margin-left:10px">（数据直接来源本服务器日志）</span></td></tr>\
+                    <tr><td class="text-right">风险等级：</td><td class="f16" style="color:red">较高风险</td></tr>\
+                    <tr><td class="text-right" style="vertical-align:top">风险描述：</td><td style="line-height:20px">' + atxt + '</td></tr>\
+                    <tr><td class="text-right" style="vertical-align:top">可参考解决方案：</td><td><p style="margin-bottom:8px">方案一：修改SSH默认端口，修改SSH验证方式为数字证书，清除近期登陆日志。</p><p>方案二：购买宝塔企业运维版，一键部署安全隔离服务，高效且方便。</p></td></tr>\
+                    </tbody>\
+                </table>\
+            </div>'
     });
-    $(".showDanger td").css("padding", "8px")
+    $(".showDanger td").css("padding", "8px");
 }
 
 function pluginInit(){
@@ -882,5 +885,579 @@ function loadKeyDataCount(){
             },'json');
         }
         call(pname);
+    }
+}
+
+$(function() {
+    $(".mem-release").hover(function() {
+        $(this).addClass("shine_green");
+        if (!($(this).hasClass("mem-action"))) {
+            $(this).find(".mem-re-min").hide();
+            $(this).find(".mask").css({ "color": "#d2edd8" });
+            $(this).find(".mem-re-con").css({ "display": "block" });
+            $(this).find(".mem-re-con").animate({ "top": "0", opacity: 1 });
+            $("#memory").text('内存释放');
+        }
+    }, function() {
+        $(this).removeClass("shine_green");
+        $(this).find(".mask").css({ "color": "#20a53a" });
+        $(this).find(".mem-re-con").css({ "top": "15px", opacity: 1, "display": "none" });
+        $("#memory").text(getCookie("mem-before"));
+        $(this).find(".mem-re-min").hide();
+    }).click(function() {
+        $(this).find(".mem-re-min").hide();
+        if (!($(this).hasClass("mem-action"))) {
+            reMemory();
+            var btlen = $(".mem-release").find(".mask span").text();
+            $(this).addClass("mem-action");
+            $(this).find(".mask").css({ "color": "#20a53a" });
+            $(this).find(".mem-re-con").animate({ "top": "-400px", opacity: 0 });
+            $(this).find(".pie_right .right").css({ "transform": "rotate(3deg)" });
+            for (var i = 0; i < btlen; i++) {
+                setTimeout("rocket(" + btlen + "," + i + ")", i * 30);
+            }
+        }
+    });
+
+    $("select[name='network-io'],select[name='disk-io']").change(function () {
+        var key = $(this).val(), type = $(this).attr('name');
+        if (type == 'network-io') {
+            if (key == 'ALL') {
+                key = '';
+            }
+            setCookie('network_io_key', key);
+        } else {
+            if (key == 'ALL') {
+                key = '';
+            }
+            setCookie('disk_io_key', key);
+        }
+    });
+
+    $('.tabs-nav span').click(function () {
+        var indexs = $(this).index();
+        $(this).addClass('active').siblings().removeClass('active');
+        $('.tabs-content .tabs-item:eq(' + indexs + ')').addClass('tabs-active').siblings().removeClass('tabs-active');
+        $('.tabs-down select:eq(' + indexs + ')').removeClass('hide').siblings().addClass('hide');
+        switch (indexs) {
+        case 0:
+          index.net.table.resize();
+          break;
+        case 1:
+          index.iostat.table.resize();
+          break;
+        }
+    })
+});
+
+var index = {
+    common:{
+        ts:function (m) { return m < 10 ? '0' + m : m },
+        format:function (sjc) {
+            var time = new Date(sjc);
+            var h = time.getHours();
+            var mm = time.getMinutes();
+            var s = time.getSeconds();
+            return h+ ':' + mm + ':' +s;
+        },
+        getTime:function () {
+            var now = new Date();
+            var hour = now.getHours();
+            var minute = now.getMinutes();
+            var second = now.getSeconds();
+            if (minute < 10) {
+                minute = "0" + minute;
+            }
+            if (second < 10) {
+                second = "0" + second;
+            }
+            var nowdate = hour + ":" + minute + ":" + second;
+            return nowdate;
+        },
+    },
+    net: {
+        table: null,
+        data: {
+          xData: [],
+          yData: [],
+          zData: []
+        },
+        default_unit : 'KB/s',
+        init_select : false,
+        init: function(){
+            for (var i = 8; i >= 0; i--) {
+                var time = (new Date()).getTime();
+                index.net.data.xData.push(index.common.format(time - (i * 3 * 1000)));
+                index.net.data.yData.push(0);
+                index.net.data.zData.push(0);
+            }
+
+            index.net.table = echarts.init(document.getElementById('netImg'));
+            var option = index.net.defaultOption();
+            index.net.table.setOption(option);
+
+            window.addEventListener("resize", function () {
+                index.net.table.resize();
+            });
+        },
+        render:function(){
+            index.net.table.setOption({
+                yAxis: {
+                    name:  '单位 '+ index.net.default_unit,
+                    splitLine: { lineStyle: { color: "#eee" } },
+                    axisLine: { lineStyle: { color: "#666" } }
+                },
+                xAxis: {
+                    data: index.net.data.xData
+                },
+                series: [{
+                    name: lan.index.net_up,
+                    data: index.net.data.yData
+                }, {
+                    name: lan.index.net_down,
+                    data: index.net.data.zData
+                }]
+            });
+        },
+        defaultOption:function(){
+            var option = {
+                title: {
+                    text: "",
+                    left: 'center',
+                    textStyle: {
+                        color: '#888888',
+                        fontStyle: 'normal',
+                        fontFamily: "宋体",
+                        fontSize: 16,
+                    }
+                },
+                tooltip: {
+                    trigger: 'axis',
+                    formatter :function (config) {
+                        var _config = config, _tips = "时间：" + _config[0].axisValue + "<br />";
+                        for (var i = 0; i < config.length; i++) {
+                            if (typeof config[i].data == "undefined") {
+                                return false;
+                            }
+                            _tips += '<span style="display: inline-block;width: 10px;height: 10px;border-radius: 50%;background: ' + config[i].color + ';"></span>&nbsp;&nbsp;<span>' + config[i].seriesName + '：' + config[i].data + ' '+ index.net.default_unit + '</span><br />'
+                        }
+                        return _tips;
+                    }
+
+                },
+                legend: {
+                    data: [lan.index.net_up, lan.index.net_down],
+                    bottom: '2%'
+                },
+                xAxis: {
+                    type: 'category',
+                    boundaryGap: false,
+                    data: index.net.data.xData,
+                    axisLine: {
+                        lineStyle: {
+                            color: "#666"
+                        }
+                    }
+                },
+                yAxis: {
+                    name:  '单位 '+ index.net.default_unit,
+                    splitLine: {
+                        lineStyle: { color: "#eee" }
+                    },
+                    axisLine: {
+                        lineStyle: { color: "#666" }
+                    }
+                },
+                series: [{
+                    name: '上行',
+                    type: 'line',
+                    data: index.net.data.yData,
+                    smooth: true,
+                    showSymbol: false,
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    areaStyle: {
+                        normal: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{
+                                offset: 0,
+                                color: 'rgba(255, 140, 0,0.5)'
+                            }, {
+                                offset: 1,
+                                color: 'rgba(255, 140, 0,0.8)'
+                            }], false)
+                        }
+                    },
+                    itemStyle: {
+                        normal: {
+                            color: '#f7b851'
+                        }
+                    },
+                    lineStyle: {
+                        normal: {
+                            width: 1
+                        }
+                    }
+                },
+                {
+                    name: '下行',
+                    type: 'line',
+                    data: index.net.data.zData,
+                    smooth: true,
+                    showSymbol: false,
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    areaStyle: {
+                        normal: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{
+                                offset: 0,
+                                color: 'rgba(30, 144, 255,0.5)',
+                            }, {
+                                offset: 1,
+                                color: 'rgba(30, 144, 255,0.8)',
+                            }], false)
+                        }
+                    },
+                    itemStyle: {
+                        normal: {
+                            color: '#52a9ff',
+                        }
+                    },
+                    lineStyle: {
+                        normal: {
+                            width: 1,
+                        }
+                    }
+                }]
+            };
+            return option;
+        },
+
+        
+        add: function (up, down) {
+            var _net = this;
+            var limit = 8;
+            var d = new Date()
+            if (_net.data.xData.length >= limit) _net.data.xData.splice(0, 1);
+            if (_net.data.yData.length >= limit) _net.data.yData.splice(0, 1);
+            if (_net.data.zData.length >= limit) _net.data.zData.splice(0, 1);
+
+            _net.data.xData.push(d.getHours() + ':' + d.getMinutes() + ':' + d.getSeconds());
+
+            if (up>down){
+                var upTmp = toSizePos(up);
+                var upTmpSize = upTmp['name'].split(' ')[0];
+                index.net.default_unit = upTmp['name'].split(' ')[1] + '/s';
+
+                var downTmpSize = toSizePos(down,upTmp['pos'])['name'].split(' ')[0];
+                // console.log('up',upTmp['pos'],toSizePos(down, upTmp['pos']),downTmpSize);
+
+                _net.data.zData.push(downTmpSize);
+                _net.data.yData.push(upTmpSize);
+            } else {
+
+                var downTmp = toSizePos(down);
+                var downTmpSize = downTmp['name'].split(' ')[0];
+                index.net.default_unit = downTmp['name'].split(' ')[1] + '/s';
+
+                var upTmpSize = toSizePos(up, downTmp['pos'])['name'].split(' ')[0];
+                // console.log('down',downTmp['pos'],toSizePos(up, downTmp['pos']),upTmpSize);
+
+                _net.data.zData.push(downTmpSize);
+                _net.data.yData.push(upTmpSize);
+            }
+            
+        },
+        renderSelect:function(net){
+            // console.log(net);
+            if (!index.net.init_select){
+                var option = '';
+                var network = net.network;
+                var network_io_key = getCookie('network_io_key');
+
+                for (var name in network) {
+                    if (name == 'ALL'){
+                        option += '<option value="'+name+'">全部</option>';
+                    } else if (network_io_key == name){
+                        option += '<option value="'+name+'" selected>'+name+'</option>';
+                    } else {
+                        option += '<option value="'+name+'">'+name+'</option>';
+                    }
+                }
+                $('select[name="network-io"]').html(option);
+                index.net.init_select = true;
+            }
+        }
+    },
+
+    iostat:{
+        table: null,
+        data: {
+          xData: [],
+          yData: [],
+          zData: [],
+          tipsData: []
+        },
+        init_select:false,
+        default_unit : 'MB/s',
+        init:function(){
+            for (var i = 8; i >= 0; i--) {
+                var time = (new Date()).getTime();
+                index.iostat.data.xData.push(index.common.format(time - (i * 3 * 1000)));
+                index.iostat.data.yData.push(0);
+                index.iostat.data.zData.push(0);
+                index.iostat.data.tipsData.push({});
+            }
+
+            index.iostat.table = echarts.init(document.getElementById('ioStat'));
+            var option = index.iostat.defaultOption();
+            index.iostat.table.setOption(option);
+
+            window.addEventListener("resize", function () {
+                index.iostat.table.resize();
+            });
+        },
+
+        render:function(){
+            index.iostat.table.setOption({
+                tooltip: {
+                    trigger: 'axis',
+                    formatter :function (config) {
+                        var _config = config, _tips = "时间：" + _config[0].axisValue + "<br />", options = {
+                            read_bytes: '读取字节数',
+                            read_count: '读取次数 ',
+                            read_merged_count: '合并读取次数',
+                            read_time: '读取延迟',
+                            write_bytes: '写入字节数',
+                            write_count: '写入次数',
+                            write_merged_count: '合并写入次数',
+                            write_time: '写入延迟',
+                        }, data = index.iostat.data.tipsData[config[0].dataIndex], list = ['read_count', 'write_count', 'read_merged_count', 'write_merged_count', 'read_time', 'write_time',];
+                        for (var i = 0; i < config.length; i++) {
+                            if (typeof config[i].data == "undefined") {
+                                return false;
+                            }
+                            _tips += '<span style="display: inline-block;width: 10px;height: 10px;border-radius: 50%;background: ' + config[i].color + ';"></span>&nbsp;&nbsp;<span>' + config[i].seriesName + '：' + config[i].data + ' MB/s' + '</span><br />'
+                        }
+                        $.each(list, function (index, item) {
+
+                            if (typeof data[item] != 'undefined'){
+                                _tips += '<span style="display: inline-block;width: 10px;height: 10px;"></span>&nbsp;&nbsp;<span style="' + (item.indexOf('time') > -1 ? ('color:' + ((data[item] > 100 && data[item] < 1000) ? '#ff9900' : (data[item] >= 1000 ? 'red' : '#20a53a'))) : '') + '">' + options[item] + '：' + data[item] + (item.indexOf('time') > -1 ? ' ms' : ' 次/秒') + '</span><br />';
+                            }
+                        })
+                        return _tips;
+                    }
+                },
+                yAxis: {
+                    name:  '单位 '+ index.iostat.default_unit,
+                    splitLine: { lineStyle: { color: "#eee" } },
+                    axisLine: { lineStyle: { color: "#666" } }
+                },
+                xAxis: {
+                    data: index.iostat.data.xData
+                },
+                series: [{
+                    name: "读取",
+                    data: index.iostat.data.yData
+                }, {
+                    name: "写入",
+                    data: index.iostat.data.zData
+                }]
+            });
+        },
+        defaultOption:function(){
+            var option = {
+                title: {
+                    text: "",
+                    left: 'center',
+                    textStyle: {
+                        color: '#888888',
+                        fontStyle: 'normal',
+                        fontFamily: "宋体",
+                        fontSize: 16,
+                    }
+                },
+                tooltip: {
+                    trigger: 'axis'
+                },
+                legend: {
+                    data: ["读取", "写入"],
+                    bottom: '2%'
+                },
+                xAxis: {
+                    type: 'category',
+                    boundaryGap: false,
+                    data: index.iostat.data.xData,
+                    axisLine: {
+                        lineStyle: {
+                            color: "#666"
+                        }
+                    }
+                },
+                yAxis: {
+                    name:  '单位 '+ index.iostat.default_unit,
+                    splitLine: {
+                        lineStyle: { color: "#eee" }
+                    },
+                    axisLine: {
+                        lineStyle: { color: "#666" }
+                    }
+                },
+                series: [{
+                    name: '读取',
+                    type: 'line',
+                    data: index.iostat.data.yData,
+                    smooth: true,
+                    showSymbol: false,
+                    symbol: 'circle',
+                    areaStyle: {
+                        normal: {
+                            color: 'rgb(255, 70, 131)'
+                        }
+                    },
+                    itemStyle: {
+                        normal: {
+                            color: 'rgb(255, 70, 131)'
+                        }
+                    },
+                    lineStyle: {
+                        normal: {
+                            width: 1,
+                        }
+                    }
+                },
+                {
+                    name: '写入',
+                    type: 'line',
+                    data: index.iostat.data.zData,
+                    smooth: true,
+                    showSymbol: false,
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    areaStyle: {
+                        normal: {
+                            color: 'rgba(46, 165, 186, .7)'
+                        }
+                    },
+                    itemStyle: {
+                        normal: {
+                            color: 'rgba(46, 165, 186, .7)'
+                        }
+                    },
+                    lineStyle: {
+                        normal: {
+                            width: 1,
+                        }
+                    }
+                }]
+            };
+            return option;
+        },
+
+        renderSelect:function(data){
+            if (!index.iostat.init_select){
+                var option = '';
+                var iostat = data.iostat;
+                var disk_io_key = getCookie('disk_io_key');
+
+                for (var name in iostat) {
+                    if (name == 'ALL'){
+                        option += '<option value="'+name+'">全部</option>';
+                    } else if (disk_io_key == name){
+                        option += '<option value="'+name+'" selected>'+name+'</option>';
+                    } else {
+                        option += '<option value="'+name+'">'+name+'</option>';
+                    }
+                }
+                $('select[name="disk-io"]').html(option);
+                index.iostat.init_select = true;
+            }
+        },
+        add: function (read, write, data) {
+            var _iostat = this;
+            var limit = 8;
+            var d = new Date()
+            if (_iostat.data.xData.length >= limit) _iostat.data.xData.splice(0, 1);
+            if (_iostat.data.yData.length >= limit) _iostat.data.yData.splice(0, 1);
+            if (_iostat.data.zData.length >= limit) _iostat.data.zData.splice(0, 1);
+            if (_iostat.data.tipsData.length >= limit) _iostat.data.tipsData.splice(0, 1);
+
+
+            var readTmpSize = toSizeMB(read).split(' ')[0];
+            var writeTmpSize = toSizeMB(write).split(' ')[0];
+
+            _iostat.data.zData.push(writeTmpSize);
+            _iostat.data.yData.push(readTmpSize);
+            _iostat.data.tipsData.push(data);
+            _iostat.data.xData.push(d.getHours() + ':' + d.getMinutes() + ':' + d.getSeconds());
+        },
+
+    },
+    getData:function(){
+
+        $.get("/system/network", function(net) {
+
+            //网络IO
+            var network_io_key = getCookie('network_io_key');
+            var network_data = net.network;
+            var network_select = network_data['ALL'];
+            if (network_io_key && network_io_key != ''){
+                network_select = network_data[network_io_key];
+            }
+
+            index.net.add(network_select.up,network_select.down);
+            index.net.render();
+            index.net.renderSelect(net);
+
+            $("#upSpeed").html(toSize(network_select.up));
+            $("#downSpeed").html(toSize(network_select.down));
+
+            $("#downAll").html(toSize(network_select.downTotal));
+            $("#downAll").attr('title','数据包:' + network_select.downPackets)
+            $("#upAll").html(toSize(network_select.upTotal));
+            $("#upAll").attr('title','数据包:' + network_select.upPackets)
+
+
+            //磁盘IO
+            var disk_io_key = getCookie('disk_io_key');
+            var iostat_data = net.iostat;
+            var iostat_select = iostat_data['ALL'];
+            if (disk_io_key && disk_io_key != ''){
+                iostat_select = iostat_data[disk_io_key];
+            }
+
+            index.iostat.add(iostat_select.read_bytes,iostat_select.write_bytes, iostat_select);
+            index.iostat.render();
+            index.iostat.renderSelect(net);
+
+            $("#readBytes").html(toSize(iostat_select.read_bytes));
+            $("#writeBytes").html(toSize(iostat_select.write_bytes));
+            $("#diskIops").html(iostat_select.read_count+":"+iostat_select.write_count+ " 次");
+            $("#diskTime").html(iostat_select.read_time+":"+iostat_select.write_time +" ms");
+
+
+            $("#core").html(net.cpu[1] + " " + lan.index.cpu_core);
+            $("#state").html(net.cpu[0]);
+            
+            setcolor(net.cpu[0], "#state", 30, 70, 90);
+            //负载
+            getLoad(net.load);
+            //内存
+            setMemImg(net.mem);
+            //绑定hover事件
+            setImg();
+            showCpuTips(net);
+
+        },'json');
+    },
+    task:function(){
+        // index.getData();
+        setInterval(function() {
+            index.getData();
+        }, 3000);
+    },
+    init: function(){
+        index.net.init();
+        index.iostat.init();
+        index.task();
     }
 }

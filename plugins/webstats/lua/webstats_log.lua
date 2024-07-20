@@ -8,7 +8,7 @@ log_by_lua_block {
 		package.path = cpath .. "?.lua;" .. package.path
 	end
 
-	local ver = '0.2.3'
+	local ver = '0.2.4'
 	local debug_mode = true
 
 	local __C = require "webstats_common"
@@ -44,7 +44,7 @@ log_by_lua_block {
 	local sites = require "webstats_sites"
 
 	-- string.gsub(C:get_sn(ngx.var.server_name),'_','.')
-	local server_name = ngx.var.server_name
+	local server_name = C:get_sn(ngx.var.server_name)
 
 
 	C:setConfData(config, sites)
@@ -134,6 +134,7 @@ log_by_lua_block {
 
 	local function exclude_url()
 		if not ngx.var.uri then return false end
+		if not ngx.var.request_uri then return false end
 		if not auto_config['exclude_url'] then return false end
 		local the_uri = string.sub(ngx.var.request_uri, 2)
 		local url_conf = auto_config["exclude_url"]
@@ -210,7 +211,7 @@ log_by_lua_block {
 		-- local request_time = ngx.var.request_time
 		local request_time = C:get_request_time()
 		local client_port = ngx.var.remote_port
-		local real_server_name = server_name
+		local real_server_name = ngx.var.server_name
 		local uri = ngx.var.uri
 		local status_code = ngx.status
 		local protocol = ngx.var.server_protocol
@@ -259,7 +260,7 @@ log_by_lua_block {
 				end
 			end
 
-			if ngx.re.find("500,501,502,503,504,505,506,507,509,510,400,401,402,403,404,405,406,407,408,409,410,411,412,413,414,415,416,417,418,421,422,423,424,425,426,449,451", tostring(status_code), "jo") then
+			if ngx.re.find("500,501,502,503,504,505,506,507,509,510,400,401,402,403,404,405,406,407,408,409,410,411,412,413,414,415,416,417,418,421,422,423,424,425,426,449,451,499", tostring(status_code), "jo") then
 				local field = "status_"..status_code
 				request_stat_fields = request_stat_fields .. ","..field.."="..field.."+1"
 			end
@@ -324,6 +325,12 @@ log_by_lua_block {
 		end
 
 		local remote_addr = ngx.var.remote_addr
+
+		-- 修复反向代理代过来的数据
+		if "table" == type(ip_list) then
+            ip_list = json.encode(ip_list)
+        end
+
 		if not string.find(ip_list, remote_addr) then
 			if remote_addr then
 				ip_list = ip_list .. "," .. remote_addr
@@ -385,7 +392,7 @@ log_by_lua_block {
 				end
 			end
 
-			if ngx.re.find("500,501,502,503,504,505,506,507,509,510,400,401,402,403,404,405,406,407,408,409,410,411,412,413,414,415,416,417,418,421,422,423,424,425,426,449,451", tostring(status_code), "jo") then
+			if ngx.re.find("500,501,502,503,504,505,506,507,509,510,400,401,402,403,404,405,406,407,408,409,410,411,412,413,414,415,416,417,418,421,422,423,424,425,426,449,451,499", tostring(status_code), "jo") then
 				local field = "status_"..status_code
 				request_stat_fields[field] = 1
 			end
@@ -439,9 +446,9 @@ log_by_lua_block {
 		}
 
 		local push_data = json.encode(data)
-
+		-- C:D(json.encode(push_data))
 		local key = C:getTotalKey()
-		ngx.shared.mw_total:rpush(key, push_data)		
+		ngx.shared.mw_total:rpush(key, push_data)
  	end
 
  	local function store_logs_line(db, stmt, input_server_name, lineno)
@@ -630,7 +637,7 @@ log_by_lua_block {
 	end
 
 	local function run_app()
-		-- D("------------ debug start ------------")
+		-- C:D("------------ debug start ------------")
 		init_var()
 
 		load_global_exclude_ip()
@@ -641,7 +648,7 @@ log_by_lua_block {
 
 		-- cache_logs_old(server_name)
 		-- store_logs(server_name)
-		-- D("------------ debug end -------------")
+		-- C:D("------------ debug end -------------")
 	end
 
 

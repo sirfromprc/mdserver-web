@@ -44,9 +44,10 @@ def mw_async(f):
 class system_api:
     setupPath = None
     pids = None
-
+    cache = {}
     def __init__(self):
         self.setupPath = mw.getServerDir()
+
 
     ##### ----- start ----- ###
     def networkApi(self):
@@ -166,6 +167,33 @@ class system_api:
         except:
             return False
 
+    def getEnvInfoApi(self, get=None):
+        serverInfo = {}
+        serverInfo['status'] = True
+        sdir = mw.getServerDir()
+
+        serverInfo['webserver'] = '未安装'
+        if os.path.exists(sdir + '/openresty/nginx/sbin/nginx'):
+            serverInfo['webserver'] = 'OpenResty'
+        serverInfo['php'] = []
+        phpversions = ['52', '53', '54', '55', '56', '70', '71',
+                       '72', '73', '74', '80', '81', '82', '83', '84']
+        phpPath = sdir + '/php/'
+        for pv in phpversions:
+            if not os.path.exists(phpPath + pv + '/bin/php'):
+                continue
+            serverInfo['php'].append(pv)
+        serverInfo['mysql'] = False
+        if os.path.exists(sdir + '/mysql/bin/mysql'):
+            serverInfo['mysql'] = True
+        import psutil
+        try:
+            diskInfo = psutil.disk_usage('/www')
+        except:
+            diskInfo = psutil.disk_usage('/')
+        serverInfo['disk'] = diskInfo[2]
+        return mw.returnJson(True, 'ok', serverInfo)
+
     def getPanelInfo(self, get=None):
         # 取面板配置
         address = mw.GetLocalIp()
@@ -227,8 +255,7 @@ class system_api:
         data['load_average'] = self.GetLoadAverage(get)
         data['title'] = self.GetTitle()
         data['network'] = self.GetNetWorkApi(get)
-        data['panel_status'] = not os.path.exists(
-            '/www/server/mdserver-web/data/close.pl')
+        data['panel_status'] = not os.path.exists('/www/server/mdserver-web/data/close.pl')
         import firewalls
         ssh_info = firewalls.firewalls().GetSshInfo(None)
         data['enable_ssh_status'] = ssh_info['status']
@@ -246,27 +273,61 @@ class system_api:
             title = mw.readFile(titlePl).strip()
         return title
 
+    def getSystemDeviceTemperature(self):
+        if not hasattr(psutil, "sensors_temperatures"):
+            return False, "platform not supported"
+        temps = psutil.sensors_temperatures()
+        if not temps:
+            return False, "can't read any temperature"
+        for name, entries in temps.items():
+            for entry in entries:
+                return True, entry.label
+                # print("%-20s %s °C (high = %s °C, critical = %s °C)" % (
+                #     entry.label or name, entry.current, entry.high,
+                #     entry.critical))
+        return False, ""
+
     def getSystemVersion(self):
+        #
         # 取操作系统版本
-        if mw.getOs() == 'darwin':
+        current_os = mw.getOs()
+        # sys_temper = self.getSystemDeviceTemperature()
+        # print(sys_temper)
+        # mac
+        if current_os == 'darwin':
             data = mw.execShell('sw_vers')[0]
             data_list = data.strip().split("\n")
             mac_version = ''
             for x in data_list:
-                mac_version += x.split("\t")[1] + ' '
-            return mac_version
+                xlist = x.split("\t")
+                mac_version += xlist[len(xlist)-1] + ' '
+
+            arch_ver = mw.execShell("arch")
+            return mac_version + " (" + arch_ver[0].strip() + ")"
+
+        # freebsd
+        if current_os.startswith('freebsd'):
+            version = mw.execShell(
+                "cat /etc/*-release | grep PRETTY_NAME | awk -F = '{print $2}' | awk -F '\"' '{print $2}'")
+            arch_ver = mw.execShell(
+                "sysctl -a | egrep -i 'hw.machine_arch' | awk -F ':' '{print $2}'")
+            return version[0].strip() + " (" + arch_ver[0].strip() + ")"
 
         redhat_series = '/etc/redhat-release'
         if os.path.exists(redhat_series):
             version = mw.readFile('/etc/redhat-release')
             version = version.replace('release ', '').strip()
-            return version
+
+            arch_ver = mw.execShell("arch")
+            return version + " (" + arch_ver[0].strip() + ")"
 
         os_series = '/etc/os-release'
         if os.path.exists(os_series):
             version = mw.execShell(
                 "cat /etc/*-release | grep PRETTY_NAME | awk -F = '{print $2}' | awk -F '\"' '{print $2}'")
-            return version[0].strip()
+
+            arch_ver = mw.execShell("arch")
+            return version[0].strip() + " (" + arch_ver[0].strip() + ")"
 
         return '未识别系统信息'
 
@@ -291,7 +352,7 @@ class system_api:
         cpuCount = psutil.cpu_count()
         cpuLogicalNum = psutil.cpu_count(logical=False)
         used = psutil.cpu_percent(interval=interval)
-
+        cpuLogicalNum = 0
         if os.path.exists('/proc/cpuinfo'):
             c_tmp = mw.readFile('/proc/cpuinfo')
             d_tmp = re.findall("physical id.+", c_tmp)
@@ -306,15 +367,15 @@ class system_api:
         mem = psutil.virtual_memory()
         if mw.getOs() == 'darwin':
             memInfo = {
-                'memTotal': mem.total / 1024 / 1024
+                'memTotal': mem.total,
             }
             memInfo['memRealUsed'] = memInfo['memTotal'] * (mem.percent / 100)
         else:
             memInfo = {
-                'memTotal': mem.total / 1024 / 1024,
-                'memFree': mem.free / 1024 / 1024,
-                'memBuffers': mem.buffers / 1024 / 1024,
-                'memCached': mem.cached / 1024 / 1024
+                'memTotal': mem.total,
+                'memFree': mem.free,
+                'memBuffers': mem.buffers,
+                'memCached': mem.cached
             }
 
             memInfo['memRealUsed'] = memInfo['memTotal'] - \
@@ -427,7 +488,7 @@ class system_api:
                     shutil.rmtree(filename)
                 else:
                     os.remove(filename)
-                print('mail clear ok')
+                # print('mail clear ok')
                 num += 1
             total += size
             count += num
@@ -486,37 +547,180 @@ class system_api:
     def getNetWork(self):
         # 取网络流量信息
         try:
-            # 取网络流量信息
-            networkIo = self.psutilNetIoCounters()
-            if not "otime" in session:
-                session['up'] = networkIo[0]
-                session['down'] = networkIo[1]
-                session['otime'] = time.time()
-
-            ntime = time.time()
             networkInfo = {}
-            networkInfo['upTotal'] = networkIo[0]
-            networkInfo['downTotal'] = networkIo[1]
-            networkInfo['up'] = round(float(
-                networkIo[0] - session['up']) / 1024 / (ntime - session['otime']), 2)
-            networkInfo['down'] = round(
-                float(networkIo[1] - session['down']) / 1024 / (ntime - session['otime']), 2)
-            networkInfo['downPackets'] = networkIo[3]
-            networkInfo['upPackets'] = networkIo[2]
+            # 取网络流量信息
+            # networkIo = self.psutilNetIoCounters()
+            # if not "otime" in session:
+            #     session['up'] = networkIo[0]
+            #     session['down'] = networkIo[1]
+            #     session['otime'] = time.time()
 
-            # print networkIo[1], session['down'], ntime, session['otime']
-            session['up'] = networkIo[0]
-            session['down'] = networkIo[1]
-            session['otime'] = time.time()
+            # ntime = time.time()
+            # print("source",ntime - session['otime'])
+            
+            # networkInfo['upTotal'] = networkIo[0]
+            # networkInfo['downTotal'] = networkIo[1]
+            # networkInfo['up'] = round(float(
+            #     networkIo[0] - session['up']) / (ntime - session['otime']), 2)
+            # networkInfo['down'] = round(
+            #     float(networkIo[1] - session['down']) / (ntime - session['otime']), 2)
+            # networkInfo['downPackets'] = networkIo[3]
+            # networkInfo['upPackets'] = networkIo[2]
+
+            # # print networkIo[1], session['down'], ntime, session['otime']
+            # session['up'] = networkIo[0]
+            # session['down'] = networkIo[1]
+            # session['otime'] = time.time()
 
             networkInfo['cpu'] = self.getCpuInfo()
             networkInfo['load'] = self.getLoadAverage()
             networkInfo['mem'] = self.getMemInfo()
+            networkInfo['iostat'] = self.getDiskIostat()
+            networkInfo['network'] = self.getNetWorkIostat()
 
             return networkInfo
         except Exception as e:
-            print("getNetWork error:", e)
+            print(mw.getTracebackInfo())
             return None
+
+    def getNetWorkIostat(self):
+        netInfo = {}
+
+        netInfo['ALL'] = {}
+        netInfo['ALL']['up'] = 0
+        netInfo['ALL']['down'] = 0
+        netInfo['ALL']['upTotal'] = 0
+        netInfo['ALL']['downTotal'] = 0
+        netInfo['ALL']['upPackets'] = 0
+        netInfo['ALL']['downPackets'] = 0
+
+        mtime = time.time()
+        iokey = 'netstat'
+        netio = None
+        if iokey in self.cache:
+            netio = self.cache[iokey]
+
+        if not netio:
+            netio = {}
+            netio['info'] = None
+            netio['all_io'] = None
+            netio['time'] = mtime
+
+        stime = mtime - netio['time']
+        if not stime: stime = 1
+
+        # print("new:",stime)
+        netio_group = psutil.net_io_counters(pernic=True).keys()
+
+        netio_cache = netio['info']
+        allio_cache = netio['all_io']
+        if not netio_cache:
+            netio_cache = {}
+
+        netio_group_t = {}
+        for name in netio_group:
+            netInfo[name] = {}
+
+            io_data = psutil.net_io_counters(pernic=True).get(name)
+            if not name in netio_cache:
+                netio_cache[name] = io_data
+
+            netio_group_t[name] = io_data
+
+            netInfo[name]['up'] = round(float((io_data[0] - netio_cache[name][0]) / stime), 2)
+            netInfo[name]['down'] = round(float((io_data[1] - netio_cache[name][1])/ stime), 2)
+
+            netInfo[name]['upTotal'] = io_data[0]
+            netInfo[name]['downTotal'] = io_data[1]
+            netInfo[name]['upPackets'] = io_data[2]
+            netInfo[name]['downPackets'] = io_data[3]
+
+        all_io = psutil.net_io_counters()[:4]
+        if not allio_cache:
+            allio_cache = all_io
+        
+        netInfo['ALL']['up'] = round(float((all_io[0] - allio_cache[0]) /stime), 2)
+        netInfo['ALL']['down'] = round(float((all_io[1] - allio_cache[1]) /stime), 2)
+        netInfo['ALL']['upTotal'] = all_io[0]
+        netInfo['ALL']['downTotal'] = all_io[1]
+        netInfo['ALL']['upPackets'] = all_io[2]
+        netInfo['ALL']['downPackets'] = all_io[3]
+
+        self.cache[iokey] = {'info':netio_group_t,'all_io':all_io,'time':mtime}
+        return netInfo
+
+
+    def getDiskIostat(self):
+        iokey = 'iostat'
+        
+        diskInfo = {}
+        diskInfo['ALL'] = {}
+        diskInfo['ALL']['read_count'] = 0
+        diskInfo['ALL']['write_count'] = 0
+        diskInfo['ALL']['read_bytes'] = 0
+        diskInfo['ALL']['write_bytes'] = 0
+        diskInfo['ALL']['read_time'] = 0
+        diskInfo['ALL']['write_time'] = 0
+        diskInfo['ALL']['read_merged_count'] = 0
+        diskInfo['ALL']['write_merged_count'] = 0
+
+        try:
+            diskio = None
+            if iokey in self.cache:
+                diskio = self.cache[iokey]
+            
+            mtime = int(time.time())
+            if not diskio:
+                diskio = {}
+                diskio['info'] = None
+                diskio['time'] = mtime
+
+            diskio_cache = diskio['info']
+            stime = mtime - diskio['time']
+            if not stime: stime = 1
+
+            diskio_group = psutil.disk_io_counters(perdisk=True)
+            if not diskio_cache:
+                diskio_cache = diskio_group
+            
+            for disk_name in diskio_group.keys():
+                diskInfo[disk_name] = {}
+                # print('disk_name',disk_name)
+                # print(diskio_group[disk_name].write_time , diskio_cache[disk_name].write_time)
+                # print(diskio_group[disk_name].write_count , diskio_cache[disk_name].write_count)
+
+                diskInfo[disk_name]['read_count']   = int((diskio_group[disk_name].read_count - diskio_cache[disk_name].read_count) / stime)
+                diskInfo[disk_name]['write_count']  = int((diskio_group[disk_name].write_count - diskio_cache[disk_name].write_count) / stime)
+                diskInfo[disk_name]['read_bytes']   = int((diskio_group[disk_name].read_bytes - diskio_cache[disk_name].read_bytes) / stime)
+                diskInfo[disk_name]['write_bytes']  = int((diskio_group[disk_name].write_bytes - diskio_cache[disk_name].write_bytes) / stime)
+                diskInfo[disk_name]['read_time']    = int((diskio_group[disk_name].read_time - diskio_cache[disk_name].read_time) / stime)
+                diskInfo[disk_name]['write_time']   = int((diskio_group[disk_name].write_time - diskio_cache[disk_name].write_time) / stime)
+
+                if 'read_merged_count' in diskio_group[disk_name] and 'read_merged_count' in diskio_cache[disk_name]:
+                    diskInfo[disk_name]['read_merged_count'] = int((diskio_group[disk_name].read_merged_count - diskio_cache[disk_name].read_merged_count) / stime)
+                if 'write_merged_count' in diskio_group[disk_name] and 'write_merged_count' in diskio_cache[disk_name]:
+                    diskInfo[disk_name]['write_merged_count'] = int((diskio_group[disk_name].write_merged_count - diskio_cache[disk_name].write_merged_count) / stime)
+                
+                diskInfo['ALL']['read_count'] += diskInfo[disk_name]['read_count']
+                diskInfo['ALL']['write_count'] += diskInfo[disk_name]['write_count']
+                diskInfo['ALL']['read_bytes'] += diskInfo[disk_name]['read_bytes']
+                diskInfo['ALL']['write_bytes'] += diskInfo[disk_name]['write_bytes']
+                if diskInfo['ALL']['read_time'] < diskInfo[disk_name]['read_time']:
+                    diskInfo['ALL']['read_time'] = diskInfo[disk_name]['read_time']
+                if diskInfo['ALL']['write_time'] < diskInfo[disk_name]['write_time']:
+                    diskInfo['ALL']['write_time'] = diskInfo[disk_name]['write_time']
+
+                if 'read_merged_count' in diskInfo[disk_name] and 'read_merged_count' in diskInfo[disk_name]:
+                    diskInfo['ALL']['read_merged_count'] += diskInfo[disk_name]['read_merged_count']
+                if 'write_merged_count' in diskInfo[disk_name] and 'write_merged_count' in diskInfo[disk_name]:
+                    diskInfo['ALL']['write_merged_count'] += diskInfo[disk_name]['write_merged_count']
+
+            self.cache[iokey] = {'info':diskio_group,'time':mtime}
+        except Exception as e:
+            # print(mw.getTracebackInfo())
+            pass
+
+        return diskInfo
 
     def getNetWorkIoData(self, start, end):
         # 取指定时间段的网络Io
@@ -724,6 +928,36 @@ class system_api:
                 mw.execShell('rm -rf ' + toPath + '/mdserver-web-' + version)
                 mw.execShell('rm -rf ' + toPath + '/mw.zip')
 
+                update_env = '''
+#!/bin/bash
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
+
+P_VER=`python3 -V | awk '{print $2}'`
+
+if [ ! -f /www/server/mdserver-web/bin/activate ];then
+    cd /www/server/mdserver-web && python3 -m venv .
+    cd /www/server/mdserver-web && source /www/server/mdserver-web/bin/activate
+else
+    cd /www/server/mdserver-web && source /www/server/mdserver-web/bin/activate
+fi
+
+cn=$(curl -fsSL -m 10 http://ipinfo.io/json | grep "\"country\": \"CN\"")
+PIPSRC="https://pypi.python.org/simple"
+if [ ! -z "$cn" ];then
+    PIPSRC="https://pypi.tuna.tsinghua.edu.cn/simple"
+fi
+
+cd /www/server/mdserver-web && pip3 install -r /www/server/mdserver-web/requirements.txt -i $PIPSRC
+
+P_VER_D=`echo "$P_VER"|awk -F '.' '{print $1}'`
+P_VER_M=`echo "$P_VER"|awk -F '.' '{print $2}'`
+NEW_P_VER=${P_VER_D}.${P_VER_M}
+
+if [ -f /www/server/mdserver-web/version/r${NEW_P_VER}.txt ];then
+    cd /www/server/mdserver-web && pip3 install -r /www/server/mdserver-web/version/r${NEW_P_VER}.txt -i $PIPSRC
+fi
+'''
+                os.system(update_env)
                 self.restartMw()
                 return mw.returnJson(True, '安装更新成功!')
 

@@ -33,13 +33,14 @@ class firewall_api:
     __isMac = False
 
     def __init__(self):
-        if os.path.exists('/usr/sbin/iptables'):
-            self.__isIptables = True
+        iptables_file = mw.systemdCfgDir() + '/iptables.service'
         if os.path.exists('/usr/sbin/firewalld'):
             self.__isFirewalld = True
-        if os.path.exists('/usr/sbin/ufw'):
+        elif os.path.exists('/usr/sbin/ufw'):
             self.__isUfw = True
-        if mw.isAppleSystem():
+        elif os.path.exists(iptables_file):
+            self.__isIptables = True
+        elif mw.isAppleSystem():
             self.__isMac = True
 
     ##### ----- start ----- ###
@@ -83,12 +84,13 @@ class firewall_api:
         port = request.form.get('port', '').strip()
         ps = request.form.get('ps', '').strip()
         stype = request.form.get('type', '').strip()
+        protocol = request.form.get('protocol', '').strip()
 
-        data = self.addAcceptPortArgs(port, ps, stype)
+        data = self.addAcceptPortArgs(port, ps, stype, protocol)
         return mw.getJson(data)
 
     # 添加放行端口
-    def addAcceptPortArgs(self, port, ps, stype):
+    def addAcceptPortArgs(self, port, ps, stype, protocol='tcp'):
         import re
         import time
 
@@ -102,12 +104,13 @@ class firewall_api:
         if mw.M('firewall').where("port=?", (port,)).count() > 0:
             return mw.returnData(False, '您要放行的端口已存在，无需重复放行!')
 
-        msg = mw.getInfo('放行端口[{1}]成功', (port,))
+        msg = mw.getInfo('放行端口[{1}][{2}]成功', (port, protocol,))
         mw.writeLog("防火墙管理", msg)
         addtime = time.strftime('%Y-%m-%d %X', time.localtime())
-        mw.M('firewall').add('port,ps,addtime', (port, ps, addtime))
+        mw.M('firewall').add('port,protocol,ps,addtime',
+                             (port, protocol, ps, addtime))
 
-        self.addAcceptPort(port)
+        self.addAcceptPort(port, protocol)
         self.firewallReload()
         return mw.returnData(True, '添加放行(' + port + ')端口成功!')
 
@@ -122,12 +125,12 @@ class firewall_api:
         address = port
         if self.__isUfw:
             mw.execShell('ufw delete deny from ' + address + ' to any')
-        elif self.__isIptables:
-            cmd = 'iptables -D INPUT -s ' + address + ' -j DROP'
-            mw.execShell(cmd)
         elif self.__isFirewalld:
             mw.execShell(
                 'firewall-cmd --permanent --remove-rich-rule=\'rule family=ipv4 source address="' + address + '" drop\'')
+        elif self.__isIptables:
+            cmd = 'iptables -D INPUT -s ' + address + ' -j DROP'
+            mw.execShell(cmd)
         else:
             pass
 
@@ -138,31 +141,64 @@ class firewall_api:
         self.firewallReload()
         return mw.returnJson(True, '删除成功!')
 
-    # 删除放行端口
-    def delAcceptPortApi(self):
-        port = request.form.get('port', '').strip()
-        sid = request.form.get('id', '').strip()
-        mw_port = mw.readFile('data/port.pl')
-        try:
-            if(port == mw_port):
-                return mw.returnJson(False, '失败，不能删除当前面板端口!')
-            if self.__isUfw:
+    def delAcceptPortArgs(self, port, protocol='tcp'):
+        if self.__isUfw:
+            if protocol == 'tcp':
                 mw.execShell('ufw delete allow ' + port + '/tcp')
-            elif self.__isIptables:
+            if protocol == 'udp':
+                mw.execShell('ufw delete allow ' + port + '/udp')
+            if protocol == 'tcp/udp':
+                mw.execShell('ufw delete allow ' + port + '/tcp')
+                mw.execShell('ufw delete allow ' + port + '/udp')
+        elif self.__isFirewalld:
+            port = port.replace(':', '-')
+            if protocol == 'tcp':
                 mw.execShell(
-                    'iptables -D INPUT -p tcp -m state --state NEW -m tcp --dport ' + port + ' -j ACCEPT')
-            elif self.__isFirewalld:
+                    'firewall-cmd --permanent --zone=public --remove-port=' + port + '/tcp')
+            if protocol == 'udp':
+                mw.execShell(
+                    'firewall-cmd --permanent --zone=public --remove-port=' + port + '/udp')
+            if protocol == 'tcp/udp':
                 mw.execShell(
                     'firewall-cmd --permanent --zone=public --remove-port=' + port + '/tcp')
                 mw.execShell(
                     'firewall-cmd --permanent --zone=public --remove-port=' + port + '/udp')
-            else:
-                pass
-            msg = mw.getInfo('删除防火墙放行端口[{1}]成功!', (port,))
-            mw.writeLog("防火墙管理", msg)
+        elif self.__isIptables:
+            if protocol == 'tcp':
+                mw.execShell(
+                    'iptables -D INPUT -p tcp -m state --state NEW -m tcp --dport ' + port + ' -j ACCEPT')
+            if protocol == 'udp':
+                mw.execShell(
+                    'iptables -D INPUT -p udp -m state --state NEW -m udp --dport ' + port + ' -j ACCEPT')
+            if protocol == 'tcp/udp':
+                mw.execShell(
+                    'iptables -D INPUT -p tcp -m state --state NEW -m tcp --dport ' + port + ' -j ACCEPT')
+                mw.execShell(
+                    'iptables -D INPUT -p udp -m state --state NEW -m udp --dport ' + port + ' -j ACCEPT')
+        else:
+            pass
+
+        mw.M('firewall').where("port=?", (port,)).delete()
+
+        msg = mw.getInfo('删除防火墙放行端口[{1}][{2}]成功!', (port, protocol,))
+        mw.writeLog("防火墙管理", msg)
+
+        self.firewallReload()
+        return True
+
+    # 删除放行端口
+    def delAcceptPortApi(self):
+        port = request.form.get('port', '').strip()
+        protocol = request.form.get('protocol', 'tcp').strip()
+        sid = request.form.get('id', '').strip()
+        mw_port = mw.readFile('data/port.pl')
+
+        if(port == mw_port):
+            return mw.returnJson(False, '失败，不能删除当前面板端口!')
+        try:
+            self.delAcceptPortArgs(port, protocol)
             mw.M('firewall').where("id=?", (sid,)).delete()
 
-            self.firewallReload()
             return mw.returnJson(True, '删除成功!')
         except Exception as e:
             return mw.returnJson(False, '删除失败!:' + str(e))
@@ -175,12 +211,6 @@ class firewall_api:
         p = request.form.get('p', '1').strip()
         limit = request.form.get('limit', '10').strip()
         return self.getList(int(p), int(limit))
-
-    def getLogListApi(self):
-        p = request.form.get('p', '1').strip()
-        limit = request.form.get('limit', '10').strip()
-        search = request.form.get('search', '').strip()
-        return self.getLogList(int(p), int(limit), search)
 
     def getSshInfoApi(self):
         data = {}
@@ -218,16 +248,13 @@ class firewall_api:
 
         data['pass_prohibit_status'] = False
         # 密码登陆配置检查
-        pass_rep = "#PasswordAuthentication\s+(\w*)\s*\n"
+        pass_rep = "PasswordAuthentication\s+(\w*)\s*\n"
         pass_status = re.search(pass_rep, conf)
         if pass_status:
-            data['pass_prohibit_status'] = True
-
-        if not data['pass_prohibit_status']:
-            pass_rep = "PasswordAuthentication\s+(\w*)\s*\n"
-            pass_status = re.search(pass_rep, conf)
             if pass_status and pass_status.groups(0)[0].strip() == 'no':
                 data['pass_prohibit_status'] = True
+        else:
+            data['pass_prohibit_status'] = True
 
         data['port'] = port
         data['status'] = status
@@ -254,26 +281,15 @@ class firewall_api:
         conf = re.sub(rep, "Port " + port + "\n", conf)
         mw.writeFile(file, conf)
 
+        self.addAcceptPortArgs(port, 'SSH端口修改', 'port')
         if self.__isUfw:
-            mw.execShell('ufw allow ' + port + '/tcp')
             mw.execShell("service ssh restart")
         elif self.__isIptables:
-            mw.execShell(
-                'iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport ' + port + ' -j ACCEPT')
             mw.execShell("/etc/init.d/sshd restart")
         elif self.__isFirewalld:
-            mw.execShell('setenforce 0')
-            mw.execShell(
-                'sed -i "s#SELINUX=enforcing#SELINUX=disabled#" /etc/selinux/config')
             mw.execShell("systemctl restart sshd.service")
         else:
-            pass
-
-        self.firewallReload()
-        # mw.M('firewall').where(
-        #     "ps=?", ('SSH远程管理服务',)).setField('port', port)
-        msg = "改SSH端口为[{}]成功!".format(port)
-        mw.writeLog("防火墙管理", msg)
+            return mw.returnJson(False, '修改失败!')
         return mw.returnJson(True, '修改成功!')
 
     def setSshStatusApi(self):
@@ -314,11 +330,17 @@ class firewall_api:
 
         conf = mw.readFile(file)
 
-        if status == '1':
+        pass_rep = "PasswordAuthentication\s+(\w*)\s*\n"
+        pass_status = re.search(pass_rep, conf)
+        if not pass_status:
             rep = "(#)?PasswordAuthentication\s+(\w*)\s*\n"
             conf = re.sub(rep, "PasswordAuthentication yes\n", conf)
+
+        if status == '1':
+            rep = "PasswordAuthentication\s+(\w*)\s*\n"
+            conf = re.sub(rep, "PasswordAuthentication yes\n", conf)
         else:
-            rep = "(#)?PasswordAuthentication\s+(\w*)\s*\n"
+            rep = "PasswordAuthentication\s+(\w*)\s*\n"
             conf = re.sub(rep, "PasswordAuthentication no\n", conf)
         mw.writeFile(file, conf)
         mw.execShell("systemctl restart sshd.service")
@@ -359,6 +381,8 @@ class firewall_api:
             _list = mw.M('firewall').field('id,port,ps,addtime').limit(
                 '0,1000').order('id desc').select()
 
+            mw.execShell('iptables -P INPUT DROP')
+            mw.execShell('iptables -P OUTPUT ACCEPT')
             for x in _list:
                 port = x['port']
                 if mw.isIpAddr(port):
@@ -396,18 +420,13 @@ class firewall_api:
 
         return mw.returnData(True, '设置成功!')
 
-    def delPanelLogsApi(self):
-        mw.M('logs').where('id>?', (0,)).delete()
-        mw.writeLog('面板设置', '面板操作日志已清空!')
-        return mw.returnJson(True, '面板操作日志已清空!')
-
     ##### ----- start ----- ###
 
     def getList(self, page, limit):
 
         start = (page - 1) * limit
 
-        _list = mw.M('firewall').field('id,port,ps,addtime').limit(
+        _list = mw.M('firewall').field('id,port,protocol,ps,addtime').limit(
             str(start) + ',' + str(limit)).order('id desc').select()
         data = {}
         data['data'] = _list
@@ -421,38 +440,40 @@ class firewall_api:
         data['page'] = mw.getPage(_page)
         return mw.getJson(data)
 
-    def getLogList(self, page, limit, search=''):
-        find_search = ''
-        if search != '':
-            find_search = "type like '%" + search + "%' or log like '%" + \
-                search + "%' or addtime like '%" + search + "%'"
-
-        start = (page - 1) * limit
-
-        _list = mw.M('logs').where(find_search, ()).field(
-            'id,type,log,addtime').limit(str(start) + ',' + str(limit)).order('id desc').select()
-        data = {}
-        data['data'] = _list
-
-        count = mw.M('logs').where(find_search, ()).count()
-        _page = {}
-        _page['count'] = count
-        _page['tojs'] = 'getLogs'
-        _page['p'] = page
-
-        data['page'] = mw.getPage(_page)
-        return mw.getJson(data)
-
-    def addAcceptPort(self, port):
+    def addAcceptPort(self, port, protocol='tcp'):
         if self.__isUfw:
-            mw.execShell('ufw allow ' + port + '/tcp')
-        elif self.__isIptables:
-            cmd = 'iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport ' + port + ' -j ACCEPT'
-            mw.execShell(cmd)
+            if protocol == 'tcp':
+                mw.execShell('ufw allow ' + port + '/tcp')
+            if protocol == 'udp':
+                mw.execShell('ufw allow ' + port + '/udp')
+            if protocol == 'tcp/udp':
+                mw.execShell('ufw allow ' + port + '/tcp')
+                mw.execShell('ufw allow ' + port + '/udp')
         elif self.__isFirewalld:
             port = port.replace(':', '-')
-            cmd = 'firewall-cmd --permanent --zone=public --add-port=' + port + '/tcp'
-            mw.execShell(cmd)
+            if protocol == 'tcp':
+                cmd = 'firewall-cmd --permanent --zone=public --add-port=' + port + '/tcp'
+                mw.execShell(cmd)
+            if protocol == 'udp':
+                cmd = 'firewall-cmd --permanent --zone=public --add-port=' + port + '/udp'
+                mw.execShell(cmd)
+            if protocol == 'tcp/udp':
+                cmd = 'firewall-cmd --permanent --zone=public --add-port=' + port + '/tcp'
+                mw.execShell(cmd)
+                cmd = 'firewall-cmd --permanent --zone=public --add-port=' + port + '/udp'
+                mw.execShell(cmd)
+        elif self.__isIptables:
+            if protocol == 'tcp':
+                cmd = 'iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport ' + port + ' -j ACCEPT'
+                mw.execShell(cmd)
+            if protocol == 'udp':
+                cmd = 'iptables -I INPUT -p udp -m state --state NEW -m udp --dport ' + port + ' -j ACCEPT'
+                mw.execShell(cmd)
+            if protocol == 'tcp/udp':
+                cmd = 'iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport ' + port + ' -j ACCEPT'
+                mw.execShell(cmd)
+                cmd = 'iptables -I INPUT -p udp -m state --state NEW -m udp --dport ' + port + ' -j ACCEPT'
+                mw.execShell(cmd)
         else:
             pass
         return True

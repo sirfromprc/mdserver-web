@@ -49,6 +49,9 @@ SUFFIX_NAME=${MYSQL_VER}-${OS_SIGN}.${ARCH}
 YUM_INSTALL()
 {
 
+mkdir -p /var/run/mysqld
+chown mysql -R /var/run/mysqld
+
 #######
 mkdir -p $myDir
 
@@ -84,21 +87,15 @@ Install_mysql()
 {
 
 	echo '正在安装脚本文件...' > $install_tmp
-	if id mysql &> /dev/null ;then 
-	    echo "mysql uid is `id -u mysql`"
-	    echo "mysql shell is `grep "^mysql:" /etc/passwd |cut -d':' -f7 `"
-	else
-	    groupadd mysql
-		useradd -g mysql mysql
-	fi
+
+	mkdir -p $serverPath/mysql-yum
 
 	isYum=`which yum`
 	if [ "$isYum" != "" ];then
 		YUM_INSTALL
 	fi
-
-
-	mkdir -p $serverPath/mysql-yum
+	
+	rm -rf $myDir
 	echo '5.7' > $serverPath/mysql-yum/version.pl
 	echo '安装完成' > $install_tmp
 }

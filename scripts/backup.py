@@ -5,6 +5,7 @@
 
 import sys
 import os
+import re
 
 if sys.platform != 'darwin':
     os.chdir('/www/server/mdserver-web')
@@ -50,13 +51,11 @@ class backupTools:
         mw.execShell(cmd)
 
         endDate = time.strftime('%Y/%m/%d %X', time.localtime())
-
         print(filename)
         if not os.path.exists(filename):
             log = "网站[" + name + "]备份失败!"
             print("★[" + endDate + "] " + log)
-            print(
-                "----------------------------------------------------------------------------")
+            print("----------------------------------------------------------------------------")
             return
 
         outTime = time.time() - startTime
@@ -83,6 +82,39 @@ class backupTools:
                 if num < 1:
                     break
 
+    def getConf(self, mtype='mysql'):
+        path = mw.getServerDir() + '/' + mtype + '/etc/my.cnf'
+        return path
+
+    def recognizeDbMode(self, mtype='mysql'):
+        conf = self.getConf(mtype)
+        con = mw.readFile(conf)
+        rep = r"!include %s/(.*)?\.cnf" % (mw.getServerDir() +'/'+ mtype +"/etc/mode",)
+        mode = 'none'
+        try:
+            data = re.findall(rep, con, re.M)
+            mode = data[0]
+        except Exception as e:
+            pass
+        return mode
+
+     # 数据库密码处理
+    def mypass(self, act, root):
+        conf_file = self.getConf('mysql')
+        mw.execShell("sed -i '/user=root/d' {}".format(conf_file))
+        mw.execShell("sed -i '/password=/d' {}".format(conf_file))
+        if act:
+            mycnf = mw.readFile(conf_file)
+            src_dump = "[mysqldump]\n"
+            sub_dump = src_dump + "user=root\npassword=\"{}\"\n".format(root)
+            if not mycnf:
+                return False
+            mycnf = mycnf.replace(src_dump, sub_dump)
+            if len(mycnf) > 100:
+                mw.writeFile(conf_file, mycnf)
+            return True
+        return True
+
     def backupDatabase(self, name, count):
         db_path = mw.getServerDir() + '/mysql'
         db_name = 'mysql'
@@ -104,29 +136,32 @@ class backupTools:
         filename = backup_path + "/db_" + name + "_" + \
             time.strftime('%Y%m%d_%H%M%S', time.localtime()) + ".sql.gz"
 
-        import re
         mysql_root = mw.M('config').dbPos(db_path, db_name).where(
             "id=?", (1,)).getField('mysql_root')
 
-        mycnf = mw.readFile(db_path + '/etc/my.cnf')
-        rep = "\[mysqldump\]\nuser=root"
-        sea = "[mysqldump]\n"
-        subStr = sea + "user=root\npassword=" + mysql_root + "\n"
-        mycnf = mycnf.replace(sea, subStr)
-        if len(mycnf) > 100:
-            mw.writeFile(db_path + '/etc/my.cnf', mycnf)
+        my_cnf = self.getConf('mysql')
+        self.mypass(True, mysql_root)
 
         # mw.execShell(db_path + "/bin/mysqldump --opt --default-character-set=utf8 " +
-        #              name + " | gzip > " + filename)
-
-        # mw.execShell(db_path + "/bin/mysqldump --skip-lock-tables --default-character-set=utf8 " +
         #              name + " | gzip > " + filename)
 
         # mw.execShell(db_path + "/bin/mysqldump  --single-transaction --quick --default-character-set=utf8 " +
         #              name + " | gzip > " + filename)
 
-        mw.execShell(db_path + "/bin/mysqldump  --force --opt --default-character-set=utf8 " +
-                     name + " | gzip > " + filename)
+        # 开启一致性事务 会lock表
+        # cmd = db_path + "/bin/mysqldump --defaults-file=" + my_cnf + "  --force --opt --default-character-set=utf8 " + \
+        #     name + " | gzip > " + filename
+        option = ''
+        mode = self.recognizeDbMode('mysql')
+        if mode == 'gtid':
+            option = ' --set-gtid-purged=off '
+
+        # skip-opt 不会lock表
+        # --skip-opt --create-options
+        cmd = db_path + "/bin/mysqldump --defaults-file=" + my_cnf +" " + option +" --single-transaction -q --default-character-set=utf8mb4 " + \
+            name + " | gzip > " + filename
+        # print(cmd)
+        mw.execShell(cmd)
 
         if not os.path.exists(filename):
             endDate = time.strftime('%Y/%m/%d %X', time.localtime())
@@ -136,10 +171,7 @@ class backupTools:
                 "----------------------------------------------------------------------------")
             return
 
-        mycnf = mw.readFile(db_path + '/etc/my.cnf')
-        mycnf = mycnf.replace(subStr, sea)
-        if len(mycnf) > 100:
-            mw.writeFile(db_path + '/etc/my.cnf', mycnf)
+        self.mypass(False, mysql_root)
 
         endDate = time.strftime('%Y/%m/%d %X', time.localtime())
         outTime = time.time() - startTime
@@ -226,7 +258,7 @@ class backupTools:
             for backup in backups:
                 abspath_bk = backup_path + "/" + backup
                 mw.execShell("rm -f " + abspath_bk)
-                mw.echoInfo("|---已清理过期备份文件：" + abspath_bk)
+                mw.echoInfo("已清理过期备份文件：" + abspath_bk)
                 num -= 1
                 if num < 1:
                     break

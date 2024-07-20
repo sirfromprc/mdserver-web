@@ -1,5 +1,5 @@
 #!/bin/bash
-PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH
 
 # https://mariadb.org/download/?t=mariadb
@@ -13,20 +13,12 @@ sysName=`uname`
 install_tmp=${rootPath}/tmp/mw_install.pl
 mariadbDir=${serverPath}/source/mariadb
 
-MY_VER=10.6.9
+MY_VER=10.6.17
 
 Install_app()
 {
 	mkdir -p ${mariadbDir}
 	echo '正在安装脚本文件...' > $install_tmp
-
-	if id mysql &> /dev/null ;then 
-	    echo "mysql uid is `id -u www`"
-	    echo "mysql shell is `grep "^www:" /etc/passwd |cut -d':' -f7 `"
-	else
-	    groupadd mysql
-		useradd -g mysql mysql
-	fi
 
 	if [ "$sysName" != "Darwin" ];then
 		mkdir -p /var/log/mariadb
@@ -105,16 +97,17 @@ Install_app()
 
 		if [ -d $serverPath/mariadb ];then
 			echo '10.6' > $serverPath/mariadb/version.pl
-			echo '安装完成' > $install_tmp
+			echo '安装完成'
 		else
-			echo '安装失败' > $install_tmp
+			echo '安装失败'
 			echo 'install fail'>&2
 			exit 1
 		fi
 	fi
 
-	rm -rf ${mariadbDir}/mariadb-${MY_VER}
-	rm -rf ${mariadbDir}/mariadb-${MY_VER}.tar.gz
+	if [ -d ${mariadbDir}/mariadb-${MY_VER} ];then
+		rm -rf ${mariadbDir}/mariadb-${MY_VER}
+	fi
 }
 
 Uninstall_app()

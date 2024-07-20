@@ -35,7 +35,22 @@ if [ "$OSNAME" == "ubuntu" ];then
 	VERSION_ID="18.04"
 fi
 
-SUFFIX_NAME=${MYSQL_VER}-1${OSNAME}${VERSION_ID}_amd64
+ARCH="amd64"
+TMP_ARCH=`arch`
+if [ "$TMP_ARCH" == "x86_64" ];then
+	ARCH="amd64"
+elif [ "$TMP_ARCH" == "aarch64" ];then
+	ARCH="arm64"
+else
+	ARCH="amd64"
+fi
+
+if [ "$ARCH" != "amd64" ];then
+	echo "暂时不支持该${ARCH}" > $install_tmp
+	exit 0
+fi
+
+SUFFIX_NAME=${MYSQL_VER}-1${OSNAME}${VERSION_ID}_${ARCH}
 
 APT_INSTALL()
 {
@@ -64,7 +79,8 @@ dpkg -X mysql-community-server-core_${SUFFIX_NAME}.deb $serverPath/mysql-apt/bin
 dpkg -X mysql-community-server_${SUFFIX_NAME}.deb $serverPath/mysql-apt/bin
 dpkg -X mysql-server_${SUFFIX_NAME}.deb $serverPath/mysql-apt/bin
 
-# rm -rf $myDir
+# 测试时可关闭
+rm -rf $myDir
 #######
 }
 
@@ -80,14 +96,6 @@ rm -rf $myDir
 Install_mysql()
 {
 	echo '正在安装脚本文件...' > $install_tmp
-	if id mysql &> /dev/null ;then 
-	    echo "mysql uid is `id -u mysql`"
-	    echo "mysql shell is `grep "^mysql:" /etc/passwd |cut -d':' -f7 `"
-	else
-	    groupadd mysql
-		useradd -g mysql mysql
-	fi
-
 
 	isApt=`which apt`
 	if [ "$isApt" != "" ];then

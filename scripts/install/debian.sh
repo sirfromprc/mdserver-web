@@ -1,5 +1,5 @@
 #!/bin/bash
-PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH
 export LANG=en_US.UTF-8
 export DEBIAN_FRONTEND=noninteractive
@@ -17,6 +17,11 @@ if [ "$__GET_BIT" == "32" ];then
 	apt install -y rustc
 fi
 
+if [ "$VERSION_ID" == "10" ];then
+	apt install -y rustc
+fi
+
+
 # synchronize time first
 apt-get install ntpdate -y
 NTPHOST='time.nist.gov'
@@ -25,50 +30,80 @@ if [ ! -z "$cn" ];then
 fi
 ntpdate $NTPHOST | logger -t NTP
 
+apt install -y net-tools
+
+SSH_PORT=`netstat -ntpl|grep sshd|grep -v grep | sed -n "1,1p" | awk '{print $4}' | awk -F : '{print $2}'`
+if [ "$SSH_PORT" == "" ];then
+	SSH_PORT_LINE=`cat /etc/ssh/sshd_config | grep "Port \d*" | tail -1`
+	SSH_PORT=${SSH_PORT_LINE/"Port "/""}
+fi
+echo "SSH PORT:${SSH_PORT}"
+
+
+
+# choose lang cmd
+# dpkg-reconfigure --frontend=noninteractive locales
 if [ ! -f /usr/sbin/locale-gen ];then
 	apt install -y locales
 	sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen
 	locale-gen en_US.UTF-8
-	localedef -v -c -i en_US -f UTF-8 en_US.UTF-8
-	dpkg-reconfigure --frontend=noninteractive locales
+	localedef -v -c -i en_US -f UTF-8 en_US.UTF-8 > /dev/null 2>&1
 	update-locale LANG=en_US.UTF-8
 else
 	locale-gen en_US.UTF-8
-	localedef -v -c -i en_US -f UTF-8 en_US.UTF-8
+	localedef -v -c -i en_US -f UTF-8 en_US.UTF-8 > /dev/null 2>&1
 fi
 
-apt-get update -y
-apt install -y wget curl lsof unzip tar cron expect locate 
+apt update -y
+apt autoremove -y
+
+apt install -y wget curl lsof unzip tar cron expect locate lrzsz
+apt install -y rar 
+apt install -y unrar
+apt install -y pv
+apt install -y bc
 apt install -y python3-pip python3-dev python3-venv
+apt install -y libncurses5
+apt install -y libncurses5-dev
 
 if [ -f /usr/sbin/ufw ];then
+	# look
+	# ufw status
+	ufw enable
+	if [ "$SSH_PORT" != "" ];then
+		ufw allow $SSH_PORT/tcp
+	else
+		ufw allow 22/tcp
+	fi
 
-	ufw allow 22/tcp
 	ufw allow 80/tcp
 	ufw allow 443/tcp
-	ufw allow 888/tcp
-	# ufw allow 7200/tcp
-	# ufw allow 3306/tcp
-	# ufw allow 30000:40000/tcp
-
-fi
-
-if [ -f /usr/sbin/ufw ];then
-	ufw disable
+	ufw allow 443/udp
+	# ufw allow 888/tcp
 fi
 
 if [ ! -f /usr/sbin/ufw ];then
+	# look
+    # firewall-cmd --list-all
+    # apt remove -y firewalld
+
 	apt install -y firewalld
 	systemctl enable firewalld
-	systemctl start firewalld
+	#取消服务锁定
+    systemctl unmask firewalld
+	
 
-	firewall-cmd --permanent --zone=public --add-port=22/tcp
+	if [ "$SSH_PORT" != "" ];then
+		firewall-cmd --permanent --zone=public --add-port=${SSH_PORT}/tcp
+	else
+		firewall-cmd --permanent --zone=public --add-port=22/tcp
+	fi
 	firewall-cmd --permanent --zone=public --add-port=80/tcp
 	firewall-cmd --permanent --zone=public --add-port=443/tcp
-	firewall-cmd --permanent --zone=public --add-port=888/tcp
-	# firewall-cmd --permanent --zone=public --add-port=7200/tcp
-	# firewall-cmd --permanent --zone=public --add-port=3306/tcp
-	# firewall-cmd --permanent --zone=public --add-port=30000-40000/tcp
+	firewall-cmd --permanent --zone=public --add-port=443/udp
+	# firewall-cmd --permanent --zone=public --add-port=888/tcp
+
+	systemctl start firewalld
 
 	# fix:debian10 firewalld faq
 	# https://kawsing.gitbook.io/opensystem/andoid-shou-ji/untitled/fang-huo-qiang#debian-10-firewalld-0.6.3-error-commandfailed-usrsbinip6tablesrestorewn-failed-ip6tablesrestore-v1.8
@@ -76,9 +111,6 @@ if [ ! -f /usr/sbin/ufw ];then
 
 	firewall-cmd --reload
 fi
-
-#安装时不开启
-systemctl stop firewalld
 
 #fix zlib1g-dev fail
 echo -e "\e[0;32mfix zlib1g-dev install question start\e[0m"
@@ -112,7 +144,10 @@ echo -e "\e[0;32mfix libunwind-dev install question end\e[0m"
 apt install -y libvpx-dev
 apt install -y libxpm-dev
 apt install -y libwebp-dev
+apt install -y libfreetype6
 apt install -y libfreetype6-dev
+apt install -y libjpeg-dev 
+apt install -y libpng-dev
 
 localedef -i en_US -f UTF-8 en_US.UTF-8
 
@@ -128,9 +163,9 @@ fi
 apt install -y build-essential
 apt install -y devscripts
 
-apt install -y net-tools
 apt install -y autoconf
 apt install -y gcc
+apt install -y patchelf
 
 apt install -y libffi-dev
 apt install -y cmake automake make
@@ -143,6 +178,7 @@ apt install -y libunwind-dev
 apt install -y libpcre3 libpcre3-dev 
 apt install -y openssl
 apt install -y libssl-dev
+apt install -y libargon2-dev
 
 apt install -y libmemcached-dev
 apt install -y libsasl2-dev
@@ -151,14 +187,17 @@ apt install -y libmagickwand-dev
 
 apt install -y libxml2 libxml2-dev libbz2-dev libmcrypt-dev libpspell-dev librecode-dev
 apt install -y libgmp-dev libgmp3-dev libreadline-dev libxpm-dev
-apt install -y dia pkg-config
+apt install -y dia
+
+apt install -y pkg-config
 apt install -y zlib1g-dev
-apt install -y libjpeg-dev libpng-dev
-apt install -y libfreetype6
-apt install -y libfreetype6-dev
-apt install -y libevent-dev libncurses5-dev libldap2-dev
+
+apt install -y libevent-dev libldap2-dev
 apt install -y libzip-dev
 apt install -y libicu-dev
+apt install -y libyaml-dev 
+
+apt install -y xsltproc
 
 apt install -y libcurl4-openssl-dev
 apt install -y curl libcurl4-gnutls-dev
@@ -178,7 +217,12 @@ fi
 #https://blog.csdn.net/qq_36228377/article/details/123154344
 # ln -s  /usr/include/x86_64-linux-gnu/curl  /usr/include/curl
 if [ ! -d /usr/include/curl ];then
-    ln -s  /usr/include/x86_64-linux-gnu/curl  /usr/include/curl
+	SYS_ARCH=`arch`
+	if [ -f /usr/include/x86_64-linux-gnu/curl ];then
+		ln -s /usr/include/x86_64-linux-gnu/curl /usr/include/curl
+	else
+		ln -s /usr/include/${SYS_ARCH}-linux-gnu/curl /usr/include/curl
+	fi 
 fi
 
 apt install -y graphviz bison re2c flex libsqlite3-dev libonig-dev perl g++ libtool libxslt1-dev

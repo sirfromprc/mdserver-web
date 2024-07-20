@@ -283,6 +283,9 @@ class crontab_api:
             return mw.returnJson(is_check_pass, msg)
 
         addData = self.add(params)
+        if type(addData) == str:
+            return addData
+
         if addData > 0:
             return mw.returnJson(True, '添加成功')
         return mw.returnJson(False, '添加失败')
@@ -393,14 +396,16 @@ class crontab_api:
                 if soft_name == 'postgresql':
                     sqlite3_name = 'pgsql'
 
+                if soft_name == 'mongodb':
+                    sqlite3_name = 'mongodb'
+
             db_list = {}
             db_list['orderOpt'] = bak_data
 
             if not os.path.exists(path + '/' + sqlite3_name + '.db'):
                 db_list['data'] = []
             else:
-                db_list['data'] = mw.M('databases').dbPos(
-                    path, sqlite3_name).field('name,ps').select()
+                db_list['data'] = mw.M('databases').dbPos(path, sqlite3_name).field('name,ps').select()
             return mw.getJson(db_list)
 
         if stype == 'path':
@@ -508,6 +513,22 @@ class crontab_api:
         else:
             head = "#!/bin/bash\nPATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin\nexport PATH\n"
 
+            start_head = '''
+SCRIPT_RUN_TIME="0s"
+MW_ToSeconds()
+{
+    SEC=$1
+    if [ $SEC -lt 60 ]; then
+       SCRIPT_RUN_TIME="${SEC}s"
+    elif [ $SEC -ge 60 ] && [ $SEC -lt 3600 ];then
+       SCRIPT_RUN_TIME="$(( SEC / 60 ))m$(( SEC % 60 ))s"
+    elif [ $SEC -ge 3600 ]; then
+       SCRIPT_RUN_TIME="$(( SEC / 3600 ))h$(( (SEC % 3600) / 60 ))m$(( (SEC % 3600) % 60 ))s"
+    fi
+}
+START_MW_SHELL_TIME=`date +%s`
+'''
+
             source_bin_activate = '''
 export LANG=en_US.UTF-8
 MW_PATH=%s/bin/activate
@@ -515,8 +536,12 @@ if [ -f $MW_PATH ];then
     source $MW_PATH
 fi''' % (mw.getRunDir(),)
 
-            head = head + source_bin_activate + "\n"
+            head = head + start_head + source_bin_activate + "\n"
             log = '.log'
+
+            #所有
+            if param['sname'] == 'ALL':
+                log = ''
 
             script_dir = mw.getRunDir() + "/scripts"
             source_stype = 'database'
@@ -554,10 +579,13 @@ fi''' % (mw.getRunDir(),)
                 else:
                     shell = head + param['sbody'].replace("\r\n", "\n")
 
-                shell += '''
+            shell += '''
 echo "----------------------------------------------------------------------------"
 endDate=`date +"%Y-%m-%d %H:%M:%S"`
-echo "★[$endDate] Successful"
+END_MW_SHELL_TIME=`date +"%s"`
+((SHELL_COS_TIME=($END_MW_SHELL_TIME-$START_MW_SHELL_TIME)))
+MW_ToSeconds $SHELL_COS_TIME
+echo "★[$endDate] Successful | Script Run [$SCRIPT_RUN_TIME] "
 echo "----------------------------------------------------------------------------"
 '''
         cronPath = mw.getServerDir() + '/cron'
@@ -583,20 +611,22 @@ echo "--------------------------------------------------------------------------
 
     # 将Shell脚本写到文件
     def writeShell(self, config):
-        u_file = '/var/spool/cron/crontabs/root'
-        if not os.path.exists(u_file):
+        file = '/var/spool/cron/crontabs/root'
+        current_os = mw.getOs()
+        if current_os == 'darwin':
+            file = '/etc/crontab'
+        elif current_os.startswith("freebsd"):
+            file = '/var/cron/tabs/root'
+
+        if not os.path.exists(file):
             file = '/var/spool/cron/root'
-            if mw.isAppleSystem():
-                file = '/etc/crontab'
-        else:
-            file = u_file
 
         if not os.path.exists(file):
             mw.writeFile(file, '')
         conf = mw.readFile(file)
         conf += str(config) + "\n"
         if mw.writeFile(file, conf):
-            if not os.path.exists(u_file):
+            if not os.path.exists(file):
                 mw.execShell("chmod 600 '" + file +
                              "' && chown root.root " + file)
             else:

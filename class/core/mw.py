@@ -22,9 +22,13 @@ import hashlib
 import shlex
 import datetime
 import subprocess
+import glob
+import base64
 import re
-import db
+
 from random import Random
+
+import db
 
 
 def execShell(cmdstring, cwd=None, timeout=None, shell=True):
@@ -75,9 +79,14 @@ def getRootDir():
 def getPluginDir():
     return getRunDir() + '/plugins'
 
-
 def getPanelDataDir():
     return getRunDir() + '/data'
+
+def getMWLogs():
+    return getRunDir() + '/logs'
+
+def getPanelTmp():
+    return getRunDir() + '/tmp'
 
 
 def getServerDir():
@@ -121,6 +130,23 @@ def getAcmeDir():
     if not os.path.exists(acme):
         acme = '/.acme.sh'
     return acme
+
+
+def getAcmeDomainDir(domain):
+    acme_dir = getAcmeDir()
+    acme_domain = acme_dir + '/' + domain
+    acme_domain_ecc = acme_domain + '_ecc'
+    if os.path.exists(acme_domain_ecc):
+        acme_domain = acme_domain_ecc
+    return acme_domain
+
+
+def fileNameCheck(filename):
+    f_strs = [';', '&', '<', '>']
+    for fs in f_strs:
+        if filename.find(fs) != -1:
+            return False
+    return True
 
 
 def triggerTask():
@@ -173,10 +199,26 @@ def getFileSuffix(file):
     return ext
 
 
+
 def isAppleSystem():
     if getOs() == 'darwin':
         return True
     return False
+
+def isDocker():
+    return os.path.exists('/.dockerenv')
+
+
+def isSupportSystemctl():
+    if isAppleSystem():
+        return False
+    if isDocker():
+        return False
+
+    current_os = getOs()
+    if current_os.startswith("freebsd"):
+        return False
+    return True
 
 
 def isDebugMode():
@@ -221,13 +263,21 @@ def isInstalledWeb():
 
 def isIpAddr(ip):
     check_ip = re.compile(
-        '^(1\d{2}|2[0-4]\d|25[0-5]|[1-9]\d|[1-9])\.(1\d{2}|2[0-4]\d|25[0-5]|[1-9]\d|\d)\.(1\d{2}|2[0-4]\d|25[0-5]|[1-9]\d|\d)\.(1\d{2}|2[0-4]\d|25[0-5]|[1-9]\d|\d)$')
+        '^(1\\d{2}|2[0-4]\\d|25[0-5]|[1-9]\\d|[1-9])\\.(1\\d{2}|2[0-4]\\d|25[0-5]|[1-9]\\d|\\d)\\.(1\\d{2}|2[0-4]\\d|25[0-5]|[1-9]\\d|\\d)\\.(1\\d{2}|2[0-4]\\d|25[0-5]|[1-9]\\d|\\d)$')
     if check_ip.match(ip):
         return True
     else:
         return False
 
 
+def getWebStatus():
+    pid = getServerDir() + '/openresty/nginx/logs/nginx.pid'
+    if os.path.exists(pid):
+        return True
+    return False
+
+
+# ------------------------------ openresty start -----------------------------
 def restartWeb():
     return opWeb("reload")
 
@@ -252,14 +302,75 @@ def opWeb(method):
     return False
 
 
+def opLuaMake(cmd_name):
+    path = getServerDir() + '/web_conf/nginx/lua/lua.conf'
+    root_dir = getServerDir() + '/web_conf/nginx/lua/' + cmd_name
+    dst_path = getServerDir() + '/web_conf/nginx/lua/' + cmd_name + '.lua'
+    def_path = getServerDir() + '/web_conf/nginx/lua/empty.lua'
+
+    if not os.path.exists(root_dir):
+        execShell('mkdir -p ' + root_dir)
+
+    files = []
+    for fl in os.listdir(root_dir):
+        suffix = getFileSuffix(fl)
+        if suffix != 'lua':
+            continue
+        flpath = os.path.join(root_dir, fl)
+        files.append(flpath)
+
+    if len(files) > 0:
+        def_path = dst_path
+        content = ''
+        for f in files:
+            t = readFile(f)
+            f_base = os.path.basename(f)
+            content += '-- ' + '*' * 20 + ' ' + f_base + ' start ' + '*' * 20 + "\n"
+            content += t
+            content += "\n" + '-- ' + '*' * 20 + ' ' + f_base + ' end ' + '*' * 20 + "\n"
+        writeFile(dst_path, content)
+    else:
+        if os.path.exists(dst_path):
+            os.remove(dst_path)
+
+    conf = readFile(path)
+    conf = re.sub(cmd_name + ' (.*);',
+                  cmd_name + " " + def_path + ";", conf)
+    writeFile(path, conf)
+
+
+def opLuaInitFile():
+    opLuaMake('init_by_lua_file')
+
+
+def opLuaInitWorkerFile():
+    opLuaMake('init_worker_by_lua_file')
+
+
+def opLuaInitAccessFile():
+    opLuaMake('access_by_lua_file')
+
+
+def opLuaMakeAll():
+    opLuaInitFile()
+    opLuaInitWorkerFile()
+    opLuaInitAccessFile()
+
+# ------------------------------ openresty end -----------------------------
+
+
 def restartMw():
     import system_api
     system_api.system_api().restartMw()
 
+def restartNginx(self):
+    writeFile('data/restart_nginx.pl', 'True')
+    return True
 
 def checkWebConfig():
     op_dir = getServerDir() + '/openresty/nginx'
-    cmd = "ulimit -n 10240 && " + op_dir + \
+    # "ulimit -n 10240 && " +
+    cmd = op_dir + \
         "/sbin/nginx -t -c " + op_dir + "/conf/nginx.conf"
     result = execShell(cmd)
     searchStr = 'test is successful'
@@ -303,6 +414,9 @@ def getPageObject(args, result='1,2,3,4,5,8'):
     if 'tojs' in args:
         info['return_js'] = args['tojs']
 
+    if 'args_tpl' in args:
+        info['args_tpl'] = args['args_tpl']
+
     return (page.GetPage(info, result), page)
 
 
@@ -334,13 +448,13 @@ def getFileMd5(filename):
 
 def getRandomString(length):
     # 取随机字符串
-    str = ''
+    rnd_str = ''
     chars = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789'
     chrlen = len(chars) - 1
     random = Random()
     for i in range(length):
-        str += chars[random.randint(0, chrlen)]
-    return str
+        rnd_str += chars[random.randint(0, chrlen)]
+    return rnd_str
 
 
 def getUniqueId():
@@ -454,17 +568,60 @@ def getDate():
     return time.strftime('%Y-%m-%d %X', time.localtime())
 
 
+def getDateFromNow(tf_format="%Y-%m-%d %H:%M:%S", time_zone="Asia/Shanghai"):
+    # 取格式时间
+    import time
+    os.environ['TZ'] = time_zone
+    time.tzset()
+    return time.strftime(tf_format, time.localtime())
+
+
+def getDataFromInt(val):
+    time_format = '%Y-%m-%d %H:%M:%S'
+    time_str = time.localtime(val)
+    return time.strftime(time_format, time_str)
+
+
 def writeLog(stype, msg, args=()):
     # 写日志
+    uid = 1
     try:
         from flask import session
-        uid = 1
         if 'uid' in session:
             uid = session['uid']
-        return writeDbLog(stype, msg, args, uid)
     except Exception as e:
-        print(getTracebackInfo())
-        return False
+        pass
+        # writeFileLog(getTracebackInfo())
+    return writeDbLog(stype, msg, args, uid)
+
+
+def writeFileLog(msg, path=None, limit_size=50 * 1024 * 1024, save_limit=3):
+    log_file = getServerDir() + '/mdserver-web/logs/debug.log'
+    if path != None:
+        log_file = path
+
+    if os.path.exists(log_file):
+        size = os.path.getsize(log_file)
+        if size > limit_size:
+            log_file_rename = log_file + "_" + \
+                time.strftime("%Y-%m-%d_%H%M%S") + '.log'
+            os.rename(log_file, log_file_rename)
+            logs = sorted(glob.glob(log_file + "_*"))
+            count = len(logs)
+            save_limit = count - save_limit
+            for i in range(count):
+                if i > save_limit:
+                    break
+                os.remove(logs[i])
+                # print('|---多余日志[' + logs[i] + ']已删除!')
+
+    f = open(log_file, 'ab+')
+    msg += "\n"
+    if __name__ == '__main__':
+        print(msg)
+    f.write(msg.encode('utf-8'))
+    f.close()
+    return True
 
 
 def writeDbLog(stype, msg, args=(), uid=1):
@@ -573,31 +730,225 @@ def dePunycode(domain):
 def enCrypt(key, strings):
     # 加密字符串
     try:
+        import base64
+        _key = key.encode('utf-8')
+        _key = base64.urlsafe_b64encode(_key)
+
         if type(strings) != bytes:
             strings = strings.encode('utf-8')
+        import cryptography
         from cryptography.fernet import Fernet
-        f = Fernet(key)
+        f = Fernet(_key)
         result = f.encrypt(strings)
         return result.decode('utf-8')
     except:
-        # print(get_error_info())
+        writeFileLog(getTracebackInfo())
         return strings
 
 
 def deCrypt(key, strings):
+
     # 解密字符串
     try:
+        import base64
+        _key = key.encode('utf-8')
+        _key = base64.urlsafe_b64encode(_key)
+
         if type(strings) != bytes:
-            strings = strings.decode('utf-8')
+            strings = strings.encode('utf-8')
         from cryptography.fernet import Fernet
-        f = Fernet(key)
+        f = Fernet(_key)
         result = f.decrypt(strings).decode('utf-8')
         return result
     except:
-        # print(get_error_info())
+        writeFileLog(getTracebackInfo())
         return strings
 
 
+def enDoubleCrypt(key, strings):
+    # 加密字符串
+    try:
+        import base64
+        _key = md5(key).encode('utf-8')
+        _key = base64.urlsafe_b64encode(_key)
+
+        if type(strings) != bytes:
+            strings = strings.encode('utf-8')
+        import cryptography
+        from cryptography.fernet import Fernet
+        f = Fernet(_key)
+        result = f.encrypt(strings)
+        return result.decode('utf-8')
+    except:
+        writeFileLog(getTracebackInfo())
+        return strings
+
+
+def deDoubleCrypt(key, strings):
+    # 解密字符串
+    try:
+        import base64
+        _key = md5(key).encode('utf-8')
+        _key = base64.urlsafe_b64encode(_key)
+
+        if type(strings) != bytes:
+            strings = strings.encode('utf-8')
+        from cryptography.fernet import Fernet
+        f = Fernet(_key)
+        result = f.decrypt(strings).decode('utf-8')
+        return result
+    except:
+        writeFileLog(getTracebackInfo())
+        return strings
+
+
+def aesEncrypt(data, key='ABCDEFGHIJKLMNOP', vi='0102030405060708'):
+    # aes加密
+    # @param data 被加密的数据
+    # @param key 加解密密匙 16位
+    # @param vi 16位
+
+    from cryptography.hazmat.primitives import padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+
+    if not isinstance(data, bytes):
+        data = data.encode()
+
+    # AES_CBC_KEY = os.urandom(32)
+    # AES_CBC_IV = os.urandom(16)
+
+    AES_CBC_KEY = key.encode()
+    AES_CBC_IV = vi.encode()
+
+    # print("AES_CBC_KEY:", AES_CBC_KEY)
+    # print("AES_CBC_IV:", AES_CBC_IV)
+
+    padder = padding.PKCS7(algorithms.AES.block_size).padder()
+    padded_data = padder.update(data) + padder.finalize()
+
+    cipher = Cipher(algorithms.AES(AES_CBC_KEY),
+                    modes.CBC(AES_CBC_IV),
+                    backend=default_backend())
+    encryptor = cipher.encryptor()
+
+    edata = encryptor.update(padded_data)
+
+    # print(edata)
+    # print(str(edata))
+    # print(edata.decode())
+    return edata
+
+
+def aesDecrypt(data, key='ABCDEFGHIJKLMNOP', vi='0102030405060708'):
+    # aes加密
+    # @param data 被解密的数据
+    # @param key 加解密密匙 16位
+    # @param vi 16位
+
+    from cryptography.hazmat.primitives import padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+
+    from cryptography.hazmat.primitives import padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+
+    if not isinstance(data, bytes):
+        data = data.encode()
+
+    AES_CBC_KEY = key.encode()
+    AES_CBC_IV = vi.encode()
+
+    cipher = Cipher(algorithms.AES(AES_CBC_KEY),
+                    modes.CBC(AES_CBC_IV),
+                    backend=default_backend())
+    decryptor = cipher.decryptor()
+
+    ddata = decryptor.update(data)
+
+    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+    data = unpadder.update(ddata)
+
+    try:
+        uppadded_data = data + unpadder.finalize()
+    except ValueError:
+        raise Exception('无效的加密信息!')
+
+    return uppadded_data
+
+
+def aesEncrypt_Crypto(data, key, vi):
+    # 该方法保留，暂时不使用
+    # aes加密
+    # @param data 被加密的数据
+    # @param key 加解密密匙 16位
+    # @param vi 16位
+
+    from Crypto.Cipher import AES
+    cryptor = AES.new(key.encode('utf8'), AES.MODE_CBC, vi.encode('utf8'))
+    # 判断是否含有中文
+    zhmodel = re.compile(u'[\u4e00-\u9fff]')
+    match = zhmodel.search(data)
+    if match == None:
+        # 无中文时
+        add = 16 - len(data) % 16
+        pad = lambda s: s + add * chr(add)
+        data = pad(data)
+        enctext = cryptor.encrypt(data.encode('utf8'))
+    else:
+        # 含有中文时
+        data = data.encode()
+        add = 16 - len(data) % 16
+        data = data + add * (chr(add)).encode()
+        enctext = cryptor.encrypt(data)
+    encodestrs = base64.b64encode(enctext).decode('utf8')
+    return encodestrs
+
+
+def aesDecrypt_Crypto(data, key, vi):
+    # 该方法保留，暂时不使用
+    # aes加密
+    # @param data 被加密的数据
+    # @param key 加解密密匙 16位
+    # @param vi 16位
+
+    from crypto.Cipher import AES
+    data = data.encode('utf8')
+    encodebytes = base64.urlsafe_b64decode(data)
+    cipher = AES.new(key.encode('utf8'), AES.MODE_CBC, vi.encode('utf8'))
+    text_decrypted = cipher.decrypt(encodebytes)
+    # 判断是否含有中文
+    zhmodel = re.compile(u'[\u4e00-\u9fff]')
+    match = zhmodel.search(text_decrypted)
+    if match == False:
+        # 无中文时补位
+        unpad = lambda s: s[0:-s[-1]]
+        text_decrypted = unpad(text_decrypted)
+    text_decrypted = text_decrypted.decode('utf8').rstrip()  # 去掉补位的右侧空格
+    return text_decrypted
+
+def getDefault(data,val,def_val=''):
+    if val in data:
+        return data[val]
+    return def_val
+
+def encodeImage(imgsrc, newsrc):
+    # 图片加密
+    import struct
+    old_fp = open(imgsrc, 'rb')
+    imgFile = old_fp.read()
+    old_fp.close()
+
+    new_fp = open(newsrc,"wb")
+    for x in imgFile:
+        value = x ^ 86
+        value = hex(value)
+        s = struct.pack('B',int(value,16))
+        new_fp.write(s)
+    new_fp.close()
+    return True
+    
 def buildSoftLink(src, dst, force=False):
     '''
     建立软连接
@@ -850,10 +1201,10 @@ def getLocalIpBack():
             url = 'http://pv.sohu.com/cityjson?ie=utf-8'
             req = urllib.request.urlopen(url, timeout=10)
             content = req.read().decode('utf-8')
-            ipaddress = re.search('\d+.\d+.\d+.\d+', content).group(0)
+            ipaddress = re.search('\\d+.\\d+.\\d+.\\d+', content).group(0)
             writeFile(filename, ipaddress)
 
-        ipaddress = re.search('\d+.\d+.\d+.\d+', ipaddress).group(0)
+        ipaddress = re.search('\\d+.\\d+.\\d+.\\d+', ipaddress).group(0)
         return ipaddress
     except Exception as ex:
         # print(ex)
@@ -870,7 +1221,7 @@ def getLocalIp():
     try:
         ipaddress = readFile(filename)
         if not ipaddress or ipaddress == '127.0.0.1':
-            cmd = "curl -4 -sS --connect-timeout 5 -m 60 https://v6r.ipip.net/?format=text"
+            cmd = "curl --insecure -4 -sS --connect-timeout 5 -m 60 https://v6r.ipip.net/?format=text"
             ip = execShell(cmd)
             result = ip[0].strip()
             if result == '':
@@ -879,7 +1230,7 @@ def getLocalIp():
             return result
         return ipaddress
     except Exception as e:
-        cmd = "curl -6 -sS --connect-timeout 5 -m 60 https://v6r.ipip.net/?format=text"
+        cmd = "curl --insecure -6 -sS --connect-timeout 5 -m 60 https://v6r.ipip.net/?format=text"
         ip = execShell(cmd)
         result = ip[0].strip()
         if result == '':
@@ -908,11 +1259,17 @@ def formatDate(format="%Y-%m-%d %H:%M:%S", times=None):
     return time.strftime(format, time_local)
 
 
+def strfToTime(sdate):
+    # 转换时间
+    import time
+    return time.strftime('%Y-%m-%d', time.strptime(sdate, '%b %d %H:%M:%S %Y %Z'))
+
+
 def checkIp(ip):
     # 检查是否为IPv4地址
     import re
     p = re.compile(
-        '^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$')
+        '^((25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)$')
     if p.match(ip):
         return True
     else:
@@ -948,25 +1305,49 @@ def getClientIp():
 def checkDomainPanel():
     tmp = getHost()
     domain = readFile('data/bind_domain.pl')
-    port = readFile('data/port.pl').strip()
 
-    npid = getServerDir() + "/openresty/nginx/logs/nginx.pid"
-    if not os.path.exists(npid):
+    port = 7200
+    if os.path.exists('data/port.pl'):
+        port = readFile('data/port.pl').strip()
+
+    scheme = 'http'
+
+    choose_file = getRunDir()+'/ssl/choose.pl'
+    if os.path.exists(choose_file):
+        choose = readFile(choose_file).strip()
+        if not inArray(['local','nginx'], choose):
+            return False
+    else:
         return False
 
-    nconf = getServerDir() + "/web_conf/nginx/vhost/panel.conf"
-    if os.path.exists(nconf):
-        port = "80"
+    local_ssl = getRunDir()+'/ssl/local'
+    if choose == 'local':
+        scheme = 'https'
 
-    if domain:
-        client_ip = getClientIp()
-        if client_ip in ['127.0.0.1', 'localhost', '::1']:
+    if choose == 'nginx':
+        # print(port)
+        npid = getServerDir() + "/openresty/nginx/logs/nginx.pid"
+        if not os.path.exists(npid):
             return False
-        if tmp.strip().lower() != domain.strip().lower():
-            from flask import Flask, redirect, request, url_for
-            to = "http://" + domain + ":" + str(port)
-            return redirect(to, code=302)
+
+        nconf = getServerDir() + "/web_conf/nginx/vhost/panel.conf"
+        if os.path.exists(nconf):
+            port = "80"
+    if not domain:
+        return False
+
+    client_ip = getClientIp()
+    if client_ip in ['127.0.0.1', 'localhost', '::1']:
+        return False
+
+    if tmp.strip().lower() != domain.strip().lower():
+        from flask import Flask, redirect, request, url_for
+        to = scheme + "://" + domain + ":" + str(port)
+        # print(to)
+        return redirect(to, code=302)
+
     return False
+
 
 
 def createLinuxUser(user, group):
@@ -1004,6 +1385,15 @@ def setOwn(filename, user, group=None):
     return True
 
 
+def setMode(filename, mode):
+    # 设置文件权限
+    if not os.path.exists(filename):
+        return False
+    mode = int(str(mode), 8)
+    os.chmod(filename, mode)
+    return True
+
+
 def checkPort(port):
     # 检查端口是否合法
     ports = ['21', '443', '888']
@@ -1033,15 +1423,21 @@ def getCpuType():
         cpuinfo = execShell(cmd)
         return cpuinfo[0].strip()
 
+    current_os = getOs()
+    if current_os.startswith('freebsd'):
+        cmd = "sysctl -a | egrep -i 'hw.model' | awk -F ':' '{print $2}'"
+        cpuinfo = execShell(cmd)
+        return cpuinfo[0].strip()
+
     # 取CPU类型
     cpuinfo = open('/proc/cpuinfo', 'r').read()
-    rep = "model\s+name\s+:\s+(.+)"
+    rep = "model\\s+name\\s+:\\s+(.+)"
     tmp = re.search(rep, cpuinfo, re.I)
     if tmp:
         cpuType = tmp.groups()[0]
     else:
         cpuinfo = execShell('LANG="en_US.UTF-8" && lscpu')[0]
-        rep = "Model\s+name:\s+(.+)"
+        rep = "Model\\s+name:\\s+(.+)"
         tmp = re.search(rep, cpuinfo, re.I)
         if tmp:
             cpuType = tmp.groups()[0]
@@ -1089,7 +1485,7 @@ def makeConf():
     file = getRunDir() + '/data/json/config.json'
     if not os.path.exists(file):
         c = {}
-        c['title'] = '大圣面板'
+        c['title'] = '后羿面板'
         c['home'] = 'http://github/midoks/mdserver-web'
         c['recycle_bin'] = True
         c['template'] = 'default'
@@ -1228,7 +1624,9 @@ def checkInput(data):
 
 def checkCert(certPath='ssl/certificate.pem'):
     # 验证证书
-    openssl = '/usr/local/openssl/bin/openssl'
+    openssl = '/usr/bin/openssl'
+    if not os.path.exists(openssl):
+        openssl = '/usr/local/openssl/bin/openssl'
     if not os.path.exists(openssl):
         openssl = 'openssl'
     certPem = readFile(certPath)
@@ -1248,6 +1646,69 @@ def checkCert(certPath='ssl/certificate.pem'):
             return False
     return True
 
+
+def sortFileList(path, ftype = 'mtime', sort = 'desc'):
+    flist = os.listdir(path)
+    if ftype == 'mtime':
+        if sort == 'desc':
+            flist = sorted(flist, key=lambda f: os.path.getmtime(os.path.join(path,f)), reverse=True)
+        if sort == 'asc':
+            flist = sorted(flist, key=lambda f: os.path.getmtime(os.path.join(path,f)), reverse=False)
+
+    if ftype == 'size':
+        if sort == 'desc':
+            flist = sorted(flist, key=lambda f: os.path.getsize(os.path.join(path,f)), reverse=True)
+        if sort == 'asc':
+            flist = sorted(flist, key=lambda f: os.path.getsize(os.path.join(path,f)), reverse=False)
+
+    if ftype == 'fname':
+        if sort == 'desc':
+            flist = sorted(flist, key=lambda f: os.path.join(path,f), reverse=True)
+        if sort == 'asc':
+            flist = sorted(flist, key=lambda f: os.path.join(path,f), reverse=False)
+    return flist
+
+
+def sortAllFileList(path, ftype = 'mtime', sort = 'desc', search = '',limit = 3000):
+    count = 0
+    flist = []
+    for d_list in os.walk(path):
+        if count >= limit:
+            break
+
+        for d in d_list[1]:
+            if count >= limit:
+                break
+            if d.lower().find(search) != -1:
+                filename = d_list[0] + '/' + d
+                if not os.path.exists(filename):
+                    continue
+                count += 1
+                flist.append(filename)
+
+        for f in d_list[2]:
+            if count >= limit:
+                break
+
+            if f.lower().find(search) != -1:
+                filename = d_list[0] + '/' + f
+                if not os.path.exists(filename):
+                    continue
+                count += 1
+                flist.append(filename)
+
+    if ftype == 'mtime':
+        if sort == 'desc':
+            flist = sorted(flist, key=lambda f: os.path.getmtime(f), reverse=True)
+        if sort == 'asc':
+            flist = sorted(flist, key=lambda f: os.path.getmtime(f), reverse=False)
+
+    if ftype == 'size':
+        if sort == 'desc':
+            flist = sorted(flist, key=lambda f: os.path.getsize(f), reverse=True)
+        if sort == 'asc':
+            flist = sorted(flist, key=lambda f: os.path.getsize(f), reverse=False)
+    return flist
 
 def getPathSize(path):
     # 取文件或目录大小
@@ -1273,6 +1734,10 @@ def toSize(size):
         size = float(size) / 1024.0
         s = b
     return str(round(size, 2)) + ' ' + b
+
+
+def getPathSuffix(path):
+    return os.path.splitext(path)[-1]
 
 
 def getMacAddress():
@@ -1385,32 +1850,42 @@ def getCertName(certPath):
             result['notAfter'], "%Y-%m-%d")) - time.time()) / 86400)
         return result
     except Exception as e:
-        # print(getTracebackInfo())
+        writeFileLog(getTracebackInfo())
         return None
 
 
-def createSSL():
+def createLocalSSL():
+    if not os.path.exists('ssl/local'):
+        execShell('mkdir -p ssl/local')
+
+
     # 自签证书
-    if os.path.exists('ssl/input.pl'):
-        return True
+    # if os.path.exists('ssl/local/input.pl'):
+    #     return True
+
+    client_ip = getClientIp()
+
     import OpenSSL
     key = OpenSSL.crypto.PKey()
     key.generate_key(OpenSSL.crypto.TYPE_RSA, 2048)
     cert = OpenSSL.crypto.X509()
     cert.set_serial_number(0)
-    cert.get_subject().CN = getLocalIp()
+    
+    if client_ip == '127.0.0.1':
+        cert.get_subject().CN = '127.0.0.1'
+    else:
+        cert.get_subject().CN = getLocalIp()
+    
     cert.set_issuer(cert.get_subject())
     cert.gmtime_adj_notBefore(0)
     cert.gmtime_adj_notAfter(86400 * 3650)
     cert.set_pubkey(key)
     cert.sign(key, 'md5')
-    cert_ca = OpenSSL.crypto.dump_certificate(
-        OpenSSL.crypto.FILETYPE_PEM, cert)
-    private_key = OpenSSL.crypto.dump_privatekey(
-        OpenSSL.crypto.FILETYPE_PEM, key)
+    cert_ca = OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM, cert)
+    private_key = OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM, key)
     if len(cert_ca) > 100 and len(private_key) > 100:
-        writeFile('ssl/cert.pem', cert_ca, 'wb+')
-        writeFile('ssl/private.pem', private_key, 'wb+')
+        writeFile('ssl/local/cert.pem', cert_ca, 'wb+')
+        writeFile('ssl/local/private.pem', private_key, 'wb+')
         return True
     return False
 
@@ -1419,7 +1894,7 @@ def getSSHPort():
     try:
         file = '/etc/ssh/sshd_config'
         conf = readFile(file)
-        rep = "(#*)?Port\s+([0-9]+)\s*\n"
+        rep = "(#*)?Port\\s+([0-9]+)\\s*\n"
         port = re.search(rep, conf).groups(0)[1]
         return int(port)
     except:
@@ -1483,23 +1958,318 @@ def getMyORMDb():
     o = ormDb.ORM()
     return o
 
+##################### notify  start #########################################
+
+
+def initNotifyConfig():
+    p = getNotifyPath()
+    if not os.path.exists(p):
+        writeFile(p, '{}')
+    return True
+
+
+def getNotifyPath():
+    path = 'data/notify.json'
+    return path
+
+
+def getNotifyData(is_parse=False):
+    initNotifyConfig()
+    notify_file = getNotifyPath()
+    notify_data = readFile(notify_file)
+
+    data = json.loads(notify_data)
+
+    if is_parse:
+        tag_list = ['tgbot', 'email']
+        for t in tag_list:
+            if t in data and 'cfg' in data[t]:
+                data[t]['data'] = json.loads(deDoubleCrypt(t, data[t]['cfg']))
+    return data
+
+
+def writeNotify(data):
+    p = getNotifyPath()
+    return writeFile(p, json.dumps(data))
+
+
+def tgbotNotifyChatID():
+    data = getNotifyData(True)
+    if 'tgbot' in data and 'enable' in data['tgbot']:
+        if data['tgbot']['enable']:
+            t = data['tgbot']['data']
+            return t['chat_id']
+    return ''
+
+
+def tgbotNotifyObject():
+    data = getNotifyData(True)
+    if 'tgbot' in data and 'enable' in data['tgbot']:
+        if data['tgbot']['enable']:
+            t = data['tgbot']['data']
+            import telebot
+            bot = telebot.TeleBot(app_token)
+            return True, bot
+    return False, None
+
+
+def tgbotNotifyMessage(app_token, chat_id, msg):
+    import telebot
+    bot = telebot.TeleBot(app_token)
+    try:
+        data = bot.send_message(chat_id, msg)
+        return True
+    except Exception as e:
+        writeFileLog(str(e))
+    return False
+
+
+def tgbotNotifyHttpPost(app_token, chat_id, msg):
+    try:
+        url = 'https://api.telegram.org/bot' + app_token + '/sendMessage'
+        post_data = {
+            'chat_id': chat_id,
+            'text': msg,
+        }
+        rdata = httpPost(url, post_data)
+        return True
+    except Exception as e:
+        writeFileLog(str(e))
+    return False
+
+
+def tgbotNotifyTest(app_token, chat_id):
+    msg = 'MW-通知验证测试OK'
+    return tgbotNotifyHttpPost(app_token, chat_id, msg)
+
+
+def emailNotifyMessage(data):
+    '''
+    邮件通知
+    '''
+    sys.path.append(os.getcwd() + "/class/plugin")
+    import memail
+    try:
+        if data['smtp_ssl'] == 'ssl':
+            memail.sendSSL(data['smtp_host'], data['smtp_port'],
+                           data['username'], data['password'],
+                           data['to_mail_addr'], data['subject'], data['content'])
+        else:
+            memail.send(data['smtp_host'], data['smtp_port'],
+                        data['username'], data['password'],
+                        data['to_mail_addr'], data['subject'], data['content'])
+        return True
+    except Exception as e:
+        print(getTracebackInfo())
+    return False
+
+
+def emailNotifyTest(data):
+    # print(data)
+    data['subject'] = 'MW通知测试'
+    data['content'] = data['mail_test']
+    return emailNotifyMessage(data)
+
+
+def notifyMessageTry(msg, stype='common', trigger_time=300, is_write_log=True):
+
+    lock_file = getPanelTmp() + '/notify_lock.json'
+    if not os.path.exists(lock_file):
+        writeFile(lock_file, '{}')
+
+    lock_data = json.loads(readFile(lock_file))
+    if stype in lock_data:
+        diff_time = time.time() - lock_data[stype]['do_time']
+        if diff_time >= trigger_time:
+            lock_data[stype]['do_time'] = time.time()
+        else:
+            return False
+    else:
+        lock_data[stype] = {'do_time': time.time()}
+
+    writeFile(lock_file, json.dumps(lock_data))
+
+    if is_write_log:
+        writeLog("通知管理[" + stype + "]", msg)
+
+    data = getNotifyData(True)
+    # tag_list = ['tgbot', 'email']
+    # tagbot
+    do_notify = False
+    if 'tgbot' in data and 'enable' in data['tgbot']:
+        if data['tgbot']['enable']:
+            t = data['tgbot']['data']
+            i = sys.version_info
+
+            # telebot 在python小于3.7无法使用
+            if i[0] < 3 or i[1] < 7:
+                do_notify = tgbotNotifyHttpPost(
+                    t['app_token'], t['chat_id'], msg)
+            else:
+                do_notify = tgbotNotifyMessage(
+                    t['app_token'], t['chat_id'], msg)
+
+    if 'email' in data and 'enable' in data['email']:
+        if data['email']['enable']:
+            t = data['email']['data']
+            t['subject'] = 'MW通知'
+            t['content'] = msg
+            do_notify = emailNotifyMessage(t)
+    return do_notify
+
+
+def notifyMessage(msg, stype='common', trigger_time=300, is_write_log=True):
+    try:
+        return notifyMessageTry(msg, stype, trigger_time, is_write_log)
+    except Exception as e:
+        writeFileLog(getTracebackInfo())
+        return False
+
+
+##################### notify  end #########################################
+
+
+def getGlibcVersion():
+    try:
+        cmd_result = execShell("ldd --version")[0]
+        if not cmd_result: return ''
+        glibc_version = cmd_result.split("\n")[0].split()[-1]
+    except:
+        return ''
+    return glibc_version
+
+##################### ssh  start #########################################
+def getSshDir():
+    if isAppleSystem():
+        user = execShell("who | sed -n '2, 1p' |awk '{print $1}'")[0].strip()
+        return '/Users/' + user + '/.ssh'
+    return '/root/.ssh'
+
+
+def processExists(pname, exe=None, cmdline=None):
+    # 进程是否存在
+    try:
+        import psutil
+        pids = psutil.pids()
+        for pid in pids:
+            try:
+                p = psutil.Process(pid)
+                if p.name() == pname:
+                    if not exe and not cmdline:
+                        return True
+                    else:
+                        if exe:
+                            if p.exe() == exe:
+                                return True
+                        if cmdline:
+                            if cmdline in p.cmdline():
+                                return True
+            except:
+                pass
+        return False
+    except:
+        return True
+
+
+def createRsa():
+    # ssh-keygen -t rsa -P "" -C "midoks@163.com"
+    ssh_dir = getSshDir()
+    # mw.execShell("rm -f /root/.ssh/*")
+    if not os.path.exists(ssh_dir + '/authorized_keys'):
+        execShell('touch ' + ssh_dir + '/authorized_keys')
+
+    if not os.path.exists(ssh_dir + '/id_rsa.pub') and os.path.exists(ssh_dir + '/id_rsa'):
+        execShell('echo y | ssh-keygen -q -t rsa -P "" -f ' +
+                  ssh_dir + '/id_rsa')
+    else:
+        execShell('ssh-keygen -q -t rsa -P "" -f ' + ssh_dir + '/id_rsa')
+
+    execShell('cat ' + ssh_dir + '/id_rsa.pub >> ' +
+              ssh_dir + '/authorized_keys')
+    execShell('chmod 600 ' + ssh_dir + '/authorized_keys')
+
+
+def createSshInfo():
+    ssh_dir = getSshDir()
+    if not os.path.exists(ssh_dir + '/id_rsa') or not os.path.exists(ssh_dir + '/id_rsa.pub'):
+        createRsa()
+
+    # 检查是否写入authorized_keys
+    data = execShell("cat " + ssh_dir + "/id_rsa.pub | awk '{print $3}'")
+    if data[0] != "":
+        cmd = "cat " + ssh_dir + "/authorized_keys | grep " + data[0]
+        ak_data = execShell(cmd)
+        if ak_data[0] == "":
+            cmd = 'cat ' + ssh_dir + '/id_rsa.pub >> ' + ssh_dir + '/authorized_keys'
+            execShell(cmd)
+            execShell('chmod 600 ' + ssh_dir + '/authorized_keys')
+
+
+def connectSsh():
+    import paramiko
+    ssh = paramiko.SSHClient()
+    createSshInfo()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    port = getSSHPort()
+    try:
+        ssh.connect('127.0.0.1', port, timeout=5)
+    except Exception as e:
+        ssh.connect('localhost', port, timeout=5)
+    except Exception as e:
+        ssh.connect(getHostAddr(), port, timeout=30)
+    except Exception as e:
+        return False
+
+    shell = ssh.invoke_shell(term='xterm', width=83, height=21)
+    shell.setblocking(0)
+    return shell
+
+
+def clearSsh():
+    # 服务器IP
+    ip = getHostAddr()
+    sh = '''
+#!/bin/bash
+PLIST=`who | grep localhost | awk '{print $2}'`
+for i in $PLIST
+do
+    ps -t /dev/$i |grep -v TTY | awk '{print $1}' | xargs kill -9
+done
+
+# getHostAddr
+PLIST=`who | grep "${ip}" | awk '{print $2}'`
+for i in $PLIST
+do
+    ps -t /dev/$i |grep -v TTY | awk '{print $1}' | xargs kill -9
+done
+'''
+    if not isAppleSystem():
+        info = execShell(sh)
+        print(info[0], info[1])
+##################### ssh  end   #########################################
+
 # ---------------------------------------------------------------------------------
-# 打印相关
+# 打印相关 START
 # ---------------------------------------------------------------------------------
 
 
 def echoStart(tag):
-    print("=" * 90)
+    print("=" * 89)
     print("★开始{}[{}]".format(tag, formatDate()))
-    print("=" * 90)
+    print("=" * 89)
 
 
 def echoEnd(tag):
-    print("=" * 90)
+    print("=" * 89)
     print("☆{}完成[{}]".format(tag, formatDate()))
-    print("=" * 90)
+    print("=" * 89)
     print("\n")
 
 
 def echoInfo(msg):
     print("|-{}".format(msg))
+
+# ---------------------------------------------------------------------------------
+# 打印相关 END
+# ---------------------------------------------------------------------------------

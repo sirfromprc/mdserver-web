@@ -11,9 +11,7 @@ import re
 sys.path.append(os.getcwd() + "/class/core")
 import mw
 
-
 app_debug = False
-
 if mw.isAppleSystem():
     app_debug = True
 
@@ -31,8 +29,13 @@ def getServerDir():
 
 
 def getInitDFile():
-    if app_debug:
+    current_os = mw.getOs()
+    if current_os == 'darwin':
         return '/tmp/' + getPluginName()
+
+    if current_os.startswith('freebsd'):
+        return '/etc/rc.d/' + getPluginName()
+
     return '/etc/init.d/' + getPluginName()
 
 
@@ -83,6 +86,11 @@ def getOs():
     data = {}
     data['os'] = mw.getOs()
     ng_exe_bin = getServerDir() + "/nginx/sbin/nginx"
+
+    # if mw.isAppleSystem():
+    #     data['auth'] = True
+    #     return mw.getJson(data)
+
     if checkAuthEq(ng_exe_bin, 'root'):
         data['auth'] = True
     else:
@@ -93,6 +101,14 @@ def getOs():
 def getInitDTpl():
     path = getPluginDir() + "/init.d/nginx.tpl"
     return path
+
+
+def getPidFile():
+    file = getConf()
+    content = mw.readFile(file)
+    rep = 'pid\s*(.*);'
+    tmp = re.search(rep, content)
+    return tmp.groups()[0].strip()
 
 
 def getFileOwner(filename):
@@ -118,12 +134,15 @@ def confReplace():
     user = 'www'
     user_group = 'www'
 
-    if mw.getOs() == 'darwin':
+    current_os = mw.getOs()
+    if current_os == 'darwin':
         # macosx do
-        user = mw.execShell(
-            "who | sed -n '2, 1p' |awk '{print $1}'")[0].strip()
-        # user = 'root'
+        # user = mw.execShell(
+        #     "who | sed -n '2, 1p' |awk '{print $1}'")[0].strip()
+        user = 'midoks'
         user_group = 'staff'
+        content = content.replace('{$EVENT_MODEL}', 'kqueue')
+    elif current_os.startswith('freebsd'):
         content = content.replace('{$EVENT_MODEL}', 'kqueue')
     else:
         content = content.replace('{$EVENT_MODEL}', 'epoll')
@@ -149,15 +168,16 @@ def confReplace():
         mw.execShell('mkdir -p ' + lua_conf_dir)
 
     lua_conf = lua_conf_dir + '/lua.conf'
-    if not os.path.exists(lua_conf):
-        lua_conf_tpl = getPluginDir() + '/conf/lua.conf'
-        lua_content = mw.readFile(lua_conf_tpl)
-        lua_content = lua_content.replace('{$SERVER_PATH}', service_path)
-        mw.writeFile(lua_conf, lua_content)
+    lua_conf_tpl = getPluginDir() + '/conf/lua.conf'
+    lua_content = mw.readFile(lua_conf_tpl)
+    lua_content = lua_content.replace('{$SERVER_PATH}', service_path)
+    mw.writeFile(lua_conf, lua_content)
 
     empty_lua = lua_conf_dir + '/empty.lua'
     if not os.path.exists(empty_lua):
         mw.writeFile(empty_lua, '')
+
+    mw.opLuaMakeAll()
 
     # 静态配置
     php_conf = mw.getServerDir() + '/web_conf/php/conf'
@@ -167,17 +187,16 @@ def confReplace():
     if not os.path.exists(static_conf):
         mw.writeFile(static_conf, 'set $PHP_ENV 0;')
 
-    # give nginx root permission
-    ng_exe_bin = getServerDir() + "/nginx/sbin/nginx"
-    if not checkAuthEq(ng_exe_bin, 'root'):
-        args = getArgs()
-        sudoPwd = args['pwd']
-        cmd_own = 'chown -R ' + 'root:' + user_group + ' ' + ng_exe_bin
-        os.system('echo %s|sudo -S %s' % (sudoPwd, cmd_own))
-        cmd_mod = 'chmod 755 ' + ng_exe_bin
-        os.system('echo %s|sudo -S %s' % (sudoPwd, cmd_mod))
-        cmd_s = 'chmod u+s ' + ng_exe_bin
-        os.system('echo %s|sudo -S %s' % (sudoPwd, cmd_s))
+    # vhost
+    vhost_dir = mw.getServerDir() + '/web_conf/nginx/vhost'
+    vhost_tpl_dir = getPluginDir() + '/conf/vhost'
+    # print(vhost_dir, vhost_tpl_dir)
+    vhost_list = ['0.websocket.conf', '0.nginx_status.conf']
+    for f in vhost_list:
+        a_conf = vhost_dir + '/' + f
+        a_conf_tpl = vhost_tpl_dir + '/' + f
+        if not os.path.exists(a_conf):
+            mw.writeFile(a_conf, mw.readFile(a_conf_tpl))
 
 
 def initDreplace():
@@ -206,12 +225,34 @@ def initDreplace():
         # config replace
         confReplace()
 
+    # give nginx root permission
+    ng_exe_bin = getServerDir() + "/nginx/sbin/nginx"
+    if not checkAuthEq(ng_exe_bin, 'root'):
+        user = 'www'
+        user_group = 'www'
+        current_os = mw.getOs()
+        if current_os == 'darwin':
+            user = 'root'
+            user_group = 'staff'
+        args = getArgs()
+        if not 'pwd' in args:
+            print("权限不足，需要认证启动!")
+            exit(0)
+
+        sudoPwd = args['pwd']
+        cmd_own = 'chown -R ' + user+':' + user_group + ' ' + ng_exe_bin
+        mw.execShell('echo %s|sudo -S %s' % (sudoPwd, cmd_own))
+        cmd_mod = 'chmod 755 ' + ng_exe_bin
+        mw.execShell('echo %s|sudo -S %s' % (sudoPwd, cmd_mod))
+        cmd_s = 'chmod u+s ' + ng_exe_bin
+        mw.execShell('echo %s|sudo -S %s' % (sudoPwd, cmd_s))
+
     # systemd
     # /usr/lib/systemd/system
     systemDir = mw.systemdCfgDir()
     systemService = systemDir + '/openresty.service'
-    systemServiceTpl = getPluginDir() + '/init.d/openresty.service.tpl'
     if os.path.exists(systemDir) and not os.path.exists(systemService):
+        systemServiceTpl = getPluginDir() + '/init.d/openresty.service.tpl'
         se_content = mw.readFile(systemServiceTpl)
         se_content = se_content.replace('{$SERVER_PATH}', service_path)
         mw.writeFile(systemService, se_content)
@@ -221,9 +262,8 @@ def initDreplace():
 
 
 def status():
-    data = mw.execShell(
-        "ps -ef|grep openresty |grep -v grep | grep -v python | awk '{print $2}'")
-    if data[0] == '':
+    pid_file = getPidFile()
+    if not os.path.exists(pid_file):
         return 'stop'
     return 'start'
 
@@ -237,20 +277,33 @@ def restyOp(method):
     if not check_data[1].find('test is successful') > -1:
         return check_data[1]
 
-    if not mw.isAppleSystem():
-        data = mw.execShell('systemctl ' + method + ' openresty')
+    current_os = mw.getOs()
+    if current_os == "darwin":
+        data = mw.execShell(file + ' ' + method)
         if data[1] == '':
             return 'ok'
         return data[1]
 
-    data = mw.execShell(file + ' ' + method)
+    if current_os.startswith("freebsd"):
+        data = mw.execShell('service openresty ' + method)
+        if data[1] == '':
+            return 'ok'
+        return data[1]
+
+    data = mw.execShell('systemctl ' + method + ' openresty')
     if data[1] == '':
         return 'ok'
     return data[1]
 
 
 def op_submit_systemctl_restart():
+    current_os = mw.getOs()
+    if current_os.startswith("freebsd"):
+        mw.execShell('service openresty restart')
+        return True
+
     mw.execShell('systemctl restart openresty')
+    return True
 
 
 def op_submit_init_restart(file):
@@ -267,12 +320,10 @@ def restyOp_restart():
         return 'ERROR: 配置出错<br><a style="color:red;">' + check_data[1].replace("\n", '<br>') + '</a>'
 
     if not mw.isAppleSystem():
-        threading.Timer(2, op_submit_systemctl_restart, args=()).start()
-        # submit_restart1()
+        threading.Timer(2, op_submit_systemctl_restart).start()
         return 'ok'
 
     threading.Timer(2, op_submit_init_restart, args=(file,)).start()
-    # submit_restart2(file)
     return 'ok'
 
 
@@ -281,21 +332,31 @@ def start():
 
 
 def stop():
-    return restyOp('stop')
+    r = restyOp('stop')
+    pid_file = getPidFile()
+    if os.path.exists(pid_file):
+        os.remove(pid_file)
+    return r
 
 
-def restart():
+def restart(version=()):
     return restyOp_restart()
 
 
 def reload():
+    confReplace()
     return restyOp('reload')
 
 
 def initdStatus():
-
-    if mw.isAppleSystem():
+    current_os = mw.getOs()
+    if current_os == 'darwin':
         return "Apple Computer does not support"
+
+    if current_os.startswith('freebsd'):
+        initd_bin = getInitDFile()
+        if os.path.exists(initd_bin):
+            return 'ok'
 
     shell_cmd = 'systemctl status openresty | grep loaded | grep "enabled;"'
     data = mw.execShell(shell_cmd)
@@ -305,16 +366,34 @@ def initdStatus():
 
 
 def initdInstall():
-    if mw.isAppleSystem():
+    current_os = mw.getOs()
+    if current_os == 'darwin':
         return "Apple Computer does not support"
+
+    # freebsd initd install
+    if current_os.startswith('freebsd'):
+        import shutil
+        source_bin = initDreplace()
+        initd_bin = getInitDFile()
+        shutil.copyfile(source_bin, initd_bin)
+        mw.execShell('chmod +x ' + initd_bin)
+        mw.execShell('sysrc ' + getPluginName() + '_enable="YES"')
+        return 'ok'
 
     mw.execShell('systemctl enable openresty')
     return 'ok'
 
 
 def initdUinstall():
-    if mw.isAppleSystem():
+    current_os = mw.getOs()
+    if current_os == 'darwin':
         return "Apple Computer does not support"
+
+    if current_os.startswith('freebsd'):
+        initd_bin = getInitDFile()
+        os.remove(initd_bin)
+        mw.execShell('sysrc ' + getPluginName() + '_enable="NO"')
+        return 'ok'
 
     mw.execShell('systemctl disable openresty')
     return 'ok'

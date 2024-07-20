@@ -74,8 +74,11 @@ def getHomePage():
         ip = '127.0.0.1'
         if not mw.isAppleSystem():
             ip = mw.getLocalIp()
-        url = 'http://' + ip + ':' + port + \
-            '/' + getCfg()['path'] + '/index.php'
+
+        cfg = getCfg()
+        auth = cfg['username']+':'+cfg['password']
+        rand_path = cfg['path']
+        url = 'http://' + auth + '@' + ip + ':' + port + '/' + rand_path + '/index.php'
         return mw.returnJson(True, 'OK', url)
     except Exception as e:
         return mw.returnJson(False, '插件未启动!')
@@ -186,8 +189,45 @@ def status():
     return 'stop'
 
 
+def __release_port(port):
+    from collections import namedtuple
+    try:
+        import firewall_api
+        firewall_api.firewall_api().addAcceptPortArgs(port, 'phpMyAdmin默认端口', 'port')
+        return port
+    except Exception as e:
+        return "Release failed {}".format(e)
+
+
+def __delete_port(port):
+    from collections import namedtuple
+    try:
+        import firewall_api
+        firewall_api.firewall_api().delAcceptPortArgs(port, 'tcp')
+        return port
+    except Exception as e:
+        return "Release failed {}".format(e)
+
+
+def openPort():
+    conf = getCfg()
+    port = conf['port']
+    for i in [port]:
+        __release_port(i)
+    return True
+
+
+def delPort():
+    conf = getCfg()
+    port = conf['port']
+    for i in [port]:
+        __delete_port(i)
+    return True
+
+
 def start():
     initCfg()
+    openPort()
 
     pma_dir = getServerDir() + "/phpmyadmin"
     if os.path.exists(pma_dir):
@@ -206,10 +246,11 @@ def start():
 
     pma_path = getServerDir() + '/pma.pass'
     if not os.path.exists(pma_path):
-        username = mw.getRandomString(10)
-        pass_cmd = username + ':' + mw.hasPwd(username)
+        username = mw.getRandomString(8)
+        password = mw.getRandomString(10)
+        pass_cmd = username + ':' + mw.hasPwd(password)
         setCfg('username', username)
-        setCfg('password', username)
+        setCfg('password', password)
         mw.writeFile(pma_path, pass_cmd)
 
     tmp = getServerDir() + "/" + getCfg()["path"] + '/tmp'
@@ -240,6 +281,7 @@ def stop():
     conf = getConf()
     if os.path.exists(conf):
         os.remove(conf)
+    delPort()
     mw.restartWeb()
     return 'ok'
 
@@ -408,9 +450,37 @@ def errorLog():
     return getServerDir() + '/error.log'
 
 
-def Version():
+def installVersion():
     return mw.readFile(getServerDir() + '/version.pl')
 
+def pluginsDbSupport():
+    data = {}
+
+    data['installed'] = 'no'
+    install_path = getServerDir()
+    if not os.path.exists(install_path):
+        return mw.returnJson(True, 'ok', data) 
+
+    data['installed'] = 'ok'
+    data['status'] = status()
+    if (data['status'] == 'stop'):
+        return mw.returnJson(True, 'ok', data)
+
+    data['cfg'] = getCfg()
+    port = getPort()
+    ip = '127.0.0.1'
+    if not mw.isAppleSystem():
+        ip = mw.getLocalIp()
+
+    cfg = data['cfg']
+    auth = cfg['username']+':'+cfg['password']
+    rand_path = cfg['path']
+    home_page = 'http://' + auth + '@' + ip + ':' + port + '/' + rand_path + '/index.php'
+
+    data['home_page'] = home_page
+    data['version'] = installVersion().strip()
+
+    return mw.returnJson(True, 'ok', data)
 
 if __name__ == "__main__":
     func = sys.argv[1]
@@ -427,7 +497,7 @@ if __name__ == "__main__":
     elif func == 'conf':
         print(getConf())
     elif func == 'version':
-        print(Version())
+        print(installVersion())
     elif func == 'get_cfg':
         print(returnCfg())
     elif func == 'config_inc':
@@ -456,5 +526,7 @@ if __name__ == "__main__":
         print(accessLog())
     elif func == 'error_log':
         print(errorLog())
+    elif func == 'plugins_db_support':
+        print(pluginsDbSupport())
     else:
         print('error')

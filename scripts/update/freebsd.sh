@@ -1,5 +1,5 @@
 #!/bin/bash
-PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH
 LANG=en_US.UTF-8
 
@@ -14,7 +14,7 @@ fi
 
 echo -e "start mw"
 cd /www/server/mdserver-web && bash cli.sh start
-isStart=`ps -ef|grep 'gunicorn -c setting.py app:app' |grep -v grep|awk '{print $2}'`
+isStart=`ps -aux|grep 'gunicorn -c setting.py app:app' |grep -v grep|awk '{print $2}'`
 n=0
 while [[ ! -f /etc/rc.d/init.d/mw ]];
 do

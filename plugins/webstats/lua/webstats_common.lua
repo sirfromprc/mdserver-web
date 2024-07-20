@@ -36,20 +36,26 @@ function _M.new(self)
         params = nil,
         site_config = nil,
         config = nil,
-
     }
     -- self.dbs = {}
     return setmetatable(self, mt)
 end
 
 
-function _M.getInstance(self)
-    if rawget(self, "instance") == nil then
-        rawset(self, "instance", self.new())
+-- function _M.getInstance(self)
+--     if rawget(self, "instance") == nil then
+--         rawset(self, "instance", self.new())
+--         self.cron()
+--     end
+--     assert(self.instance ~= nil)
+--     return self.instance
+-- end
 
-        -- if 0 == ngx.worker.id() then
+
+function _M.getInstance(self)
+    if self.instance == nil then
+        self.instance = self:new()
         self:cron()
-        -- end
     end
     assert(self.instance ~= nil)
     return self.instance
@@ -68,7 +74,7 @@ function _M.initDB(self, input_sn)
     db:exec([[PRAGMA cache_size = 8000]])
     db:exec([[PRAGMA page_size = 32768]])
     db:exec([[PRAGMA journal_mode = wal]])
-    db:exec([[PRAGMA journal_size_limit = 1073741824]])
+    db:exec([[PRAGMA journal_size_limit = 21474836480]])
     return db
 end
 
@@ -115,6 +121,10 @@ end
 
 function _M.split(self, str, reps)
     local arr = {}
+    -- 修复反向代理代过来的数据
+    if "table" == type(str) then
+        return str
+    end
     string.gsub(str,'[^'..reps..']+',function(w) table.insert(arr,w) end)
     return arr
 end
@@ -202,19 +212,20 @@ function _M.get_http_origin(self)
     local data = ""
     local headers = ngx.req.get_headers()
     if not headers then return data end
-    if method ~='GET' then 
-        -- API disabled in the context of log_by_lua*
-        -- ngx.req.read_body()
-
+    local req_method = ngx.req.get_method()
+    if req_method ~='GET' then 
+    
         -- proxy_pass, fastcgi_pass, uwsgi_pass, and scgi_pass
         data = ngx.var.request_body
         if not data then
             data = ngx.req.get_body_data()
         end
 
-        if not data then
-            data = ngx.req.get_post_args(1000000)
-        end
+        -- API disabled in the context of log_by_lua
+        -- if not data then
+        --     ngx.req.read_body()
+        --     data = ngx.req.get_post_args(1000000)
+        -- end
 
         if "string" == type(data) then
             headers["payload"] = data
@@ -228,13 +239,66 @@ function _M.get_http_origin(self)
     return json.encode(headers)
 end
 
+function _M.cronPre(self)
+    self:lock_working('cron_init_stat')
+
+    local time_key = self:get_store_key()
+    local time_key_next = self:get_store_key_with_time(ngx.time()+3600)
+
+
+    for site_k, site_v in ipairs(sites) do
+        local input_sn = site_v["name"]
+
+        local db = self:initDB(input_sn)
+
+        local wc_stat = {
+            'request_stat',
+            'client_stat',
+            'spider_stat'
+        }
+
+        local v1 = true
+        local v2 = true
+        for _,ws_v in pairs(wc_stat) do
+            v1 = self:_update_stat_pre(db, ws_v, time_key)
+            v2 = self:_update_stat_pre(db, ws_v, time_key_next)
+        end
+
+        if db and db:isopen() then
+            db:execute([[COMMIT]])
+            db:close()
+        end
+
+        if  not v1 or not v2 then
+            return false
+        end
+    end
+
+    self:unlock_working('cron_init_stat')
+
+    return true
+end
+
 -- 后台任务
 function _M.cron(self)
-    local timer_every_get_data = function (premature)
 
+    local timer_every_get_data = function (premature)
+        
         local llen, _ = ngx.shared.mw_total:llen(total_key)
-        -- self:D("llen:"..tostring(llen))
+        -- self:D("PID:"..tostring(ngx.worker.id())..",llen:"..tostring(llen))
         if llen == 0 then
+            return true
+        end
+
+        -- self:D("dedebide:cron task is busy!")
+        local ready_ok = self:cronPre()
+        if not ready_ok then
+            -- self:D("cron task is busy!")
+            return true
+        end
+
+        local cron_key = 'cron_every_1s'
+        if self:is_working(cron_key) then
             return true
         end
 
@@ -248,12 +312,17 @@ function _M.cron(self)
         local url_stats = {}
 
         local time_key = self:get_store_key()
-        local time_key_next = self:get_store_key_with_time(ngx.time()+3600)
-        
+
         for site_k, site_v in ipairs(sites) do
             local input_sn = site_v["name"]
+            -- self:D("input_sn:"..input_sn)
             -- 迁移合并时不执行
             if self:is_migrating(input_sn) then
+                return true
+            end
+
+            -- 初始化统计表时不执行
+            if self:is_working('cron_init_stat') then
                 return true
             end
 
@@ -275,25 +344,8 @@ function _M.cron(self)
                 tmp_stmt["web_logs"] = stmt
                 stmts[input_sn] = tmp_stmt
 
-                local wc_stat = {
-                    'request_stat',
-                    'client_stat',
-                    'spider_stat'
-                }
-
-                for _,ws_v in pairs(wc_stat) do
-                    self:_update_stat_pre(db, ws_v, time_key)
-                    self:_update_stat_pre(db, ws_v, time_key_next)
-                end
-
-
                 db:exec([[BEGIN TRANSACTION]])
             end
-        end
-
-        local cron_key = 'cron_every_1s'
-        if self:is_working(cron_key) then
-            return true
         end
 
         self:lock_working(cron_key)
@@ -302,18 +354,36 @@ function _M.cron(self)
         for i=1,llen do
             local data, _ = ngx.shared.mw_total:lpop(total_key)
             if not data then
+                self:unlock_working(cron_key)
                 break
             end
 
             local info = json.decode(data)
+
+            -- self:D("info:"..json.encode(info))
             local input_sn = info['server_name']
+            -- self:D("insert data input_sn:"..input_sn)
             local db = dbs[input_sn]
             local stat_fields_is = stat_fields[input_sn]
             if not db then
+                ngx.shared.mw_total:rpush(total_key, data)
+                self:unlock_working(cron_key)
                 break
             end
 
-            self:store_logs_line(db, stmts[input_sn]["web_logs"], input_sn, info)
+            local input_stmts = stmts[input_sn]["web_logs"]
+            if not input_stmts then
+                ngx.shared.mw_total:rpush(total_key, data)
+                self:unlock_working(cron_key)
+                break
+            end
+
+            local insert_ok = self:store_logs_line(db, input_stmts, input_sn, info)
+            if not insert_ok then
+                ngx.shared.mw_total:rpush(total_key, data)
+                self:unlock_working(cron_key)
+                break
+            end
 
             local excluded = info["log_kv"]['excluded']
             local stat_tmp_fields = info['stat_fields']
@@ -457,10 +527,19 @@ function _M.cron(self)
         
         self:unlock_working(cron_key)
         ngx.update_time()
-        -- self:D("--【"..tostring(llen).."】, elapsed: " .. tostring(ngx.now() - begin))
+        -- self:D("PID:"..tostring(ngx.worker.id()).."--【"..tostring(llen).."】, elapsed: " .. tostring(ngx.now() - begin))
     end
 
-    ngx.timer.every(1, timer_every_get_data)
+    
+    function timer_every_get_data_try()
+       local presult, err = pcall( function() timer_every_get_data() end)
+        if not presult then
+            self:D("debug cron error on :"..tostring(err))
+            return true
+        end
+    end
+
+    ngx.timer.every(0.5, timer_every_get_data_try)
 end
 
 
@@ -487,10 +566,8 @@ function _M.store_logs_line(self, db, stmt, input_sn, info)
     local request_headers = logline["request_headers"]
     local excluded = logline["excluded"] 
 
-
     local time_key = logline["time_key"]
     if not excluded then
-
         stmt:bind_names {
             time=time,
             ip=ip,
@@ -512,13 +589,15 @@ function _M.store_logs_line(self, db, stmt, input_sn, info)
 
         local res, err = stmt:step()
         if tostring(res) == "5" then
-            self:D("step res:"..tostring(res) ..",step err:"..tostring(err))
-            self:D("the step database connection is busy, so it will be stored later.")
+            -- self:D("json:"..json.encode(logline))
+            -- self:D("the step database connection is busy, so it will be stored later | step res:"..tostring(res) ..",step err:"..tostring(err))
+            if stmt then
+                stmt:reset()
+            end
             return false
         end
         stmt:reset()
     end
-
     return true
 end
 
@@ -537,7 +616,32 @@ function _M.statistics_request(self, ip, is_spider, body_length)
     -- 计算pv uv
     local pvc = 0
     local uvc = 0
+    local request_header = ngx.req.get_headers()
+    if not is_spider and ngx.status == 200 and body_length > 0 then
+        local ua = ''
+        if request_header['user-agent'] then
+            ua = string.lower(request_header['user-agent'])
+        end
 
+        pvc = 1
+        if ua then
+            local today = ngx.today()
+            local uv_token = ngx.md5(ip .. ua .. today)
+            if not cache:get(uv_token) then
+                uvc = 1
+                cache:set(uv_token,1, self:get_end_time())
+            end
+        end
+    end
+    return pvc, uvc
+end
+
+-- 仅计算GET/HTML
+function _M.statistics_request_old(self, ip, is_spider, body_length)
+    -- 计算pv uv
+    local pvc = 0
+    local uvc = 0
+    local method = ngx.req.get_method()
     if not is_spider and method == 'GET' and ngx.status == 200 and body_length > 512 then
         local ua = ''
         if request_header['user-agent'] then
@@ -626,9 +730,14 @@ end
 function _M._update_stat_pre(self, db, stat_table, key)
     local local_sql = string.format("INSERT INTO %s(time) SELECT :time WHERE NOT EXISTS(SELECT time FROM %s WHERE time=:time);", stat_table, stat_table)
     local update_stat_stmt = db:prepare(local_sql)
-    update_stat_stmt:bind_names{time=key}
-    update_stat_stmt:step()
-    update_stat_stmt:finalize()
+
+    if update_stat_stmt then
+        update_stat_stmt:bind_names{time=key}
+        update_stat_stmt:step()
+        update_stat_stmt:finalize()
+        return true
+    end
+    return false
 end
 
 function _M.update_stat_quick(self, db, stat_table, key,columns)
@@ -836,15 +945,21 @@ function _M.match_spider(self, ua)
     end
 
     -- Curl|Yahoo|HeadlessChrome|包含bot|Wget|Spider|Crawler|Scrapy|zgrab|python|java|Adsbot|DuckDuckGo
-    find_spider, _ = ngx.re.match(ua, "(Yahoo|Slurp|DuckDuckGo)", "ijo")
-    if res then
+    find_spider, _ = ngx.re.match(ua, "(Yahoo|Slurp|DuckDuckGo|Semrush|Spider|Bot)", "ijo")
+    if find_spider then
         spider_match = string.lower(find_spider[0])
         if string.find(spider_match, "yahoo", 1, true) then
-            spider_name = "yahoo"
+            spider_name = "other"
         elseif string.find(spider_match, "slurp", 1, true) then
-            spider_name = "yahoo"
+            spider_name = "other"
         elseif string.find(spider_match, "duckduckgo", 1, true) then
-            spider_name = "duckduckgo"
+            spider_name = "other"
+        elseif string.find(spider_match, "semrush", 1, true) then
+            spider_name = "other"
+        elseif string.find(spider_match, "spider", 1, true) then
+            spider_name = "other"
+        elseif string.find(spider_match, "bot", 1, true) then
+            spider_name = "other"
         end
         return true, spider_name, spider_table[spider_name]
     end
@@ -1057,6 +1172,7 @@ end
 function _M.get_client_ip(self)
     local client_ip = "unknown"
     local cdn = auto_config['cdn']
+    local request_header = ngx.req.get_headers()
     if cdn == true then
         for _,v in ipairs(auto_config['cdn_headers']) do
             if request_header[v] ~= nil and request_header[v] ~= "" then

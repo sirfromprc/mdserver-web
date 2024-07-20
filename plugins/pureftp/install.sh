@@ -9,6 +9,11 @@ serverPath=$(dirname "$rootPath")
 
 install_tmp=${rootPath}/tmp/mw_install.pl
 
+
+if [ -f ${rootPath}/bin/activate ];then
+	source ${rootPath}/bin/activate
+fi
+
 sysName=`uname`
 echo "use system: ${sysName}"
 
@@ -46,10 +51,11 @@ Install_pureftp()
 
 	# https://github.com/jedisct1/pure-ftpd/releases/download/1.0.49/pure-ftpd-1.0.49.tar.gz
 	# https://download.pureftpd.org/pub/pure-ftpd/releases/pure-ftpd-1.0.49.tar.gz
-	# DOWNLOAD=https://github.com/jedisct1/pure-ftpd/releases/download/${VER}/pure-ftpd-${VER}.tar.gz
+	
 
 	VER=$1
-	DOWNLOAD=https://download.pureftpd.org/pub/pure-ftpd/releases/pure-ftpd-${VER}.tar.gz
+	DOWNLOAD=https://github.com/jedisct1/pure-ftpd/releases/download/${VER}/pure-ftpd-${VER}.tar.gz
+	# DOWNLOAD=https://download.pureftpd.org/pub/pure-ftpd/releases/pure-ftpd-${VER}.tar.gz
 
 	# curl -sSLo pure-ftpd-1.0.49.tar.gz https://download.pureftpd.org/pub/pure-ftpd/releases/pure-ftpd-1.0.49.tar.gz
 	if [ ! -f $serverPath/source/pureftp/pure-ftpd-${VER}.tar.gz ];then
@@ -63,12 +69,12 @@ Install_pureftp()
 		md5_check=`md5sum $serverPath/source/pureftp/pure-ftpd-${VER}.tar.gz  | awk '{print $1}'`
 		if [ "${md5_ok}" == "${md5_check}" ]; then
 			echo "pure-ftpd file  check ok"
-		else
-			# 重新下载
-			rm -rf $serverPath/source/pureftp/pure-ftpd-${VER}
-			wget --no-check-certificate -O $serverPath/source/pureftp/pure-ftpd-${VER}.tar.gz $DOWNLOAD
-			# curl -sSLo $serverPath/source/pureftp/pure-ftpd-${VER}.tar.gz $DOWNLOAD
 		fi
+	fi
+
+	# Last Download Method
+	if [ ! -f $serverPath/source/pureftp/pure-ftpd-${VER}.tar.gz ];then
+		wget --no-check-certificate -O $serverPath/source/pureftp/pure-ftpd-${VER}.tar.gz https://dl.midoks.icu/soft/ftp/pure-ftpd-${VER}.tar.gz -T 3
 	fi
 
 	if [ ! -d $serverPath/source/pureftp/pure-ftpd-${VER} ];then

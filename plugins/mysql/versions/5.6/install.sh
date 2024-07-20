@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 #!/bin/bash
-
-PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH
 
 #https://dev.mysql.com/downloads/mysql/5.6.html
@@ -17,19 +16,11 @@ sysName=`uname`
 install_tmp=${rootPath}/tmp/mw_install.pl
 mysqlDir=${serverPath}/source/mysql
 
-
+VERSION=5.6.50
 Install_mysql()
 {
 	mkdir -p ${mysqlDir}
 	echo '正在安装脚本文件...' > $install_tmp
-
-	if id mysql &> /dev/null ;then 
-	    echo "mysql UID is `id -u www`"
-	    echo "mysql Shell is `grep "^www:" /etc/passwd |cut -d':' -f7 `"
-	else
-	    groupadd mysql
-		useradd -g mysql mysql
-	fi
 
 	if [ "$sysName" != "Darwin" ];then
 		mkdir -p /var/log/mariadb
@@ -62,12 +53,12 @@ Install_mysql()
 	# ----- cpu end ------
 	
 
-	if [ ! -f ${mysqlDir}/mysql-5.6.50.tar.gz ];then
-		wget --no-check-certificate -O ${mysqlDir}/mysql-5.6.50.tar.gz --tries=3 https://cdn.mysql.com/Downloads/MySQL-5.6/mysql-5.6.50.tar.gz
+	if [ ! -f ${mysqlDir}/mysql-${VERSION}.tar.gz ];then
+		wget --no-check-certificate -O ${mysqlDir}/mysql-${VERSION}.tar.gz --tries=3 https://cdn.mysql.com/Downloads/MySQL-5.6/mysql-${VERSION}.tar.gz
 	fi
 
-	if [ ! -d ${mysqlDir}/mysql-5.6.50 ];then
-		 cd ${mysqlDir} && tar -zxvf  ${mysqlDir}/mysql-5.6.50.tar.gz
+	if [ ! -d ${mysqlDir}/mysql-${VERSION} ];then
+		 cd ${mysqlDir} && tar -zxvf  ${mysqlDir}/mysql-${VERSION}.tar.gz
 	fi
 
 
@@ -76,13 +67,13 @@ Install_mysql()
 	OPENSSL_VERSION=`openssl version|awk '{print $2}'|awk -F '.' '{print $1}'`
 	if [ "${OPENSSL_VERSION}" -ge "3" ];then
 		#openssl version to high
-		cd ${rootPath}/plugins/php/lib && /bin/bash openssl.sh
-		export PKG_CONFIG_PATH=$serverPath/lib/openssl/lib/pkgconfig
-		OPTIONS="-DWITH_SSL=${serverPath}/lib/openssl"
+		cd ${rootPath}/plugins/php/lib && /bin/bash openssl10.sh
+		export PKG_CONFIG_PATH=$serverPath/lib/openssl10/lib/pkgconfig
+		OPTIONS="-DWITH_SSL=${serverPath}/lib/openssl10"
 	fi
 
 	if [ ! -d $serverPath/mysql ];then
-		cd ${mysqlDir}/mysql-5.6.50 && cmake \
+		cd ${mysqlDir}/mysql-${VERSION} && cmake \
 		-DCMAKE_INSTALL_PREFIX=$serverPath/mysql \
 		-DMYSQL_USER=mysql \
 		-DMYSQL_TCP_PORT=3306 \
@@ -105,11 +96,12 @@ Install_mysql()
 
 
 		if [ -d $serverPath/mysql ];then
+			rm -rf ${mysqlDir}/mysql-${VERSION}
 			echo '5.6' > $serverPath/mysql/version.pl
-			echo '安装完成' > $install_tmp
+			echo "${VERSION}安装完成"
 		else
 			# rm -rf ${mysqlDir}/mysql-5.6.50
-			echo '安装失败' > $install_tmp
+			echo "${VERSION}安装失败"
 			echo 'install fail'>&2
 			exit 1
 		fi

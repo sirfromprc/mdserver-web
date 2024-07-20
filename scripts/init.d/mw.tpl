@@ -12,16 +12,32 @@
 # Description:       starts the mw
 ### END INIT INFO
 
+RED='\033[31m'
+GREEN='\033[32m'
+YELLOW='\033[33m'
+BLUE='\033[34m'
+PLAIN='\033[0m'
+BOLD='\033[1m'
+SUCCESS='[\033[32mOK\033[0m]'
+COMPLETE='[\033[32mDONE\033[0m]'
+WARN='[\033[33mWARN\033[0m]'
+ERROR='[\033[31mERROR\033[0m]'
+WORKING='[\033[34m*\033[0m]'
+
 
 PATH=/usr/local/bin:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export LANG=en_US.UTF-8
 
 mw_path={$SERVER_PATH}
+ROOT_PATH=$(dirname "$mw_path")
 PATH=$PATH:$mw_path/bin
 
 
 if [ -f $mw_path/bin/activate ];then
     source $mw_path/bin/activate
+    if [ "$?" != "0" ];then
+        echo "load local python env fail!"
+    fi
 fi
 
 mw_start_panel()
@@ -38,7 +54,7 @@ mw_start_panel()
             sleep 0.5
             isStart=$(lsof -n -P -i:$port|grep LISTEN|grep -v grep|awk '{print $2}'|xargs)
             let n+=1
-            if [ $n -gt 15 ];then
+            if [ $n -gt 60 ];then
                 break;
             fi
         done
@@ -98,7 +114,7 @@ mw_stop_task()
     arr=($pids)
     for p in ${arr[@]}
     do
-            kill -9 $p
+        kill -9 $p  > /dev/null 2>&1
     done
     echo -e "\033[32mdone\033[0m"
 }
@@ -106,16 +122,20 @@ mw_stop_task()
 mw_stop_panel()
 {
     echo -e "stopping mw-panel... \c";
+
+    pidfile=${mw_path}/logs/mw.pid
+    if [ -f $pidfile ];then
+        pid=`cat $pidfile`
+        kill -9 $pid > /dev/null 2>&1
+        rm -f $pidfile
+    fi
+
     arr=`ps aux|grep 'gunicorn -c setting.py app:app'|grep -v grep|awk '{print $2}'`
     for p in ${arr[@]}
     do
-        kill -9 $p &>/dev/null
+        kill -9 $p > /dev/null 2>&1
     done
     
-    pidfile=${mw_path}/logs/mw.pid
-    if [ -f $pidfile ];then
-        rm -f $pidfile
-    fi
     echo -e "\033[32mdone\033[0m"
 }
 
@@ -189,6 +209,21 @@ mw_unbind_domain()
     fi
 }
 
+mw_unbind_ssl()
+{
+    if [ -f $mw_path/local ];then
+        rm -rf $mw_path/local
+    fi
+
+    if [ -f $mw_path/nginx ];then
+        rm -rf $mw_path/nginx
+    fi
+
+    if [ -f $mw_path/ssl/choose.pl ];then
+        rm -rf $mw_path/ssl/choose.pl
+    fi
+}
+
 error_logs()
 {
 	tail -n 100 $mw_path/logs/error.log
@@ -196,23 +231,69 @@ error_logs()
 
 mw_update()
 {
-    cn=$(curl -fsSL -m 10 http://ipinfo.io/json | grep "\"country\": \"CN\"")
-    if [ ! -z "$cn" ];then
-        curl -fsSL https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/scripts/update.sh | bash
+    LOCAL_ADDR=common
+    cn=$(curl -fsSL -m 10 -s http://ipinfo.io/json | grep "\"country\": \"CN\"")
+    if [ ! -z "$cn" ] || [ "$?" == "0" ] ;then
+        LOCAL_ADDR=cn
+    fi
+    
+    if [ "$LOCAL_ADDR" == "common" ];then
+        curl --insecure -fsSL https://raw.githubusercontent.com/midoks/mdserver-web/master/scripts/update.sh | bash
     else
-        curl -fsSL https://raw.githubusercontent.com/midoks/mdserver-web/master/scripts/update.sh | bash
+        curl --insecure -fsSL  https://code.midoks.icu/midoks/mdserver-web/raw/branch/dev/scripts/update.sh | bash
     fi
 }
 
 mw_update_dev()
 {
-    cn=$(curl -fsSL -m 10 http://ipinfo.io/json | grep "\"country\": \"CN\"")
-    if [ ! -z "$cn" ];then
-        curl -fsSL https://gitee.com/midoks/mdserver-web/raw/dev/scripts/update_dev.sh | bash
+    LOCAL_ADDR=common
+    cn=$(curl -fsSL -m 10 -s http://ipinfo.io/json | grep "\"country\": \"CN\"")
+    if [ ! -z "$cn" ] || [ "$?" == "0" ] ;then
+        LOCAL_ADDR=cn
+    fi
+    
+    if [ "$LOCAL_ADDR" == "common" ];then
+        curl --insecure -fsSL https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/update_dev.sh | bash
     else
-        curl -fsSL https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/update_dev.sh | bash
+        curl --insecure -fsSL https://code.midoks.icu/midoks/mdserver-web/raw/branch/dev/scripts/update_dev.sh | bash
     fi
     cd /www/server/mdserver-web
+}
+
+mw_update_venv()
+{
+    rm -rf /www/server/mdserver-web/bin
+    rm -rf /www/server/mdserver-web/lib64
+    rm -rf /www/server/mdserver-web/lib
+
+    LOCAL_ADDR=common
+    cn=$(curl -fsSL -m 10 -s http://ipinfo.io/json | grep "\"country\": \"CN\"")
+    if [ ! -z "$cn" ] || [ "$?" == "0" ] ;then
+        LOCAL_ADDR=cn
+    fi
+    
+    if [ "$LOCAL_ADDR" == "common" ];then
+        curl --insecure -fsSL https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/update_dev.sh | bash
+    else
+        curl --insecure -fsSL https://code.midoks.icu/midoks/mdserver-web/raw/branch/dev/scripts/update_dev.sh | bash
+    fi
+    cd /www/server/mdserver-web
+}
+
+mw_mirror()
+{
+    LOCAL_ADDR=common
+    cn=$(curl -fsSL -m 10 -s http://ipinfo.io/json | grep "\"country\": \"CN\"")
+    if [ ! -z "$cn" ] || [ "$?" == "0" ] ;then
+        LOCAL_ADDR=cn
+    fi
+
+    if [ "$LOCAL_ADDR" == "common" ];then
+        bash <(curl --insecure -sSL https://raw.githubusercontent.com/midoks/change-linux-mirrors/main/change-mirrors.sh)
+    else
+        bash <(curl --insecure -sSL https://gitee.com/SuperManito/LinuxMirrors/raw/main/ChangeMirrors.sh)
+    fi
+    cd ${ROOT_PATH}/mdserver-web
 }
 
 mw_install_app()
@@ -251,10 +332,130 @@ mw_debug(){
         port=$(cat $mw_path/data/port.pl)
     fi
 
-    if [ -d /www/server/mdserver-web ];then
-        cd /www/server/mdserver-web
+    if [ -d ${ROOT_PATH}/mdserver-web ];then
+        cd ${ROOT_PATH}/mdserver-web
     fi
     gunicorn -b :$port -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1  app:app
+}
+
+
+function AutoSizeStr(){
+    NAME_STR=$1
+    NAME_NUM=$2
+
+    NAME_STR_LEN=`echo "$NAME_STR" | wc -L`
+    NAME_NUM_LEN=`echo "$NAME_NUM" | wc -L`
+
+    fix_len=35
+    remaining_len=`expr $fix_len - $NAME_STR_LEN - $NAME_NUM_LEN`
+    FIX_SPACE=' '
+    for ((ass_i=1;ass_i<=$remaining_len;ass_i++))
+    do 
+        FIX_SPACE="$FIX_SPACE "
+    done
+    echo -e " ❖   ${1}${FIX_SPACE}${2})"
+}
+
+mw_connect_mysql(){
+    # choose mysql login
+
+    declare -A DB_TYPE
+
+    if [ -d "${ROOT_PATH}/mysql" ];then
+        DB_TYPE["mysql"]="mysql"
+    fi
+
+    if [ -d "${ROOT_PATH}/mariadb" ];then
+        DB_TYPE["mariadb"]="mariadb"
+    fi
+
+    if [ -d "${ROOT_PATH}/mysql-apt" ];then
+        DB_TYPE["mysql-apt"]="mysql-apt"
+    fi
+
+    if [ -d "${ROOT_PATH}/mysql-yum" ];then
+        DB_TYPE["mysql-yum"]="mysql-yum"
+    fi
+
+    SOURCE_LIST_KEY_SORT_TMP=$(echo ${!DB_TYPE[@]} | tr ' ' '\n' | sort -n)
+    SOURCE_LIST_KEY=(${SOURCE_LIST_KEY_SORT_TMP//'\n'/})
+    SOURCE_LIST_LEN=${#DB_TYPE[*]}
+
+    if [ "$SOURCE_LIST_LEN" == "0" ]; then
+        echo -e "no data!"
+        exit 1
+    fi
+
+    cm_i=0
+    for M in ${SOURCE_LIST_KEY[@]}; do
+        num=`expr $cm_i + 1`
+        AutoSizeStr "${M}" "$num"
+        cm_i=`expr $cm_i + 1`
+    done
+    CHOICE_A=$(echo -e "\n${BOLD}└─ Please select and enter the database you want to log in to [ 1-${SOURCE_LIST_LEN} ]：${PLAIN}")
+    read -p "${CHOICE_A}" INPUT
+
+    if [ "$INPUT" == "" ]; then
+        INPUT=1
+    fi
+
+    if [ "$INPUT" -lt "0" ] || [ "$INPUT" -gt "${SOURCE_LIST_LEN}" ]; then
+        echo -e "\nBoundary error not selected!"
+        exit 1
+    fi
+
+    INPUT=`expr $INPUT - 1`
+    INPUT_KEY=${SOURCE_LIST_KEY[$INPUT]}
+    CHOICE_DB=${DB_TYPE[$INPUT_KEY]}
+    echo "login to ${CHOICE_DB}:"
+
+    pwd=$(cd ${ROOT_PATH}/mdserver-web && python3 ${ROOT_PATH}/mdserver-web/plugins/${CHOICE_DB}/index.py root_pwd)
+    if [ "$CHOICE_DB" == "mysql" ];then
+        ${ROOT_PATH}/mysql/bin/mysql -uroot -p"${pwd}"
+    fi
+
+    if [ "$CHOICE_DB" == "mariadb" ];then
+        ${ROOT_PATH}/mariadb/bin/mariadb  -S ${ROOT_PATH}/mariadb/mysql.sock -uroot -p"${pwd}"
+    fi
+
+    if [ "$CHOICE_DB" == "mysql-apt" ];then
+        ${ROOT_PATH}/mysql-apt/bin/usr/bin/mysql -S ${ROOT_PATH}/mysql-apt/mysql.sock -uroot -p"${pwd}"
+    fi
+
+    if [ "$CHOICE_DB" == "mysql-yum" ];then
+        ${ROOT_PATH}/mysql-yum/bin/usr/bin/mysql -S ${ROOT_PATH}/mysql-yum/mysql.sock -uroot -p"${pwd}"
+    fi
+
+}
+
+
+mw_redis(){
+    CONF="${ROOT_PATH}/redis/redis.conf"
+
+    if [ ! -f "$CONF" ]; then
+        echo -e "not install redis!"
+        exit 1
+    fi
+
+    REDISPORT=$(cat $CONF |grep port|grep -v '#'|awk '{print $2}')
+    REDISPASS=$(cat $CONF |grep requirepass|grep -v '#'|awk '{print $2}')
+    if [ "$REDISPASS" != "" ];then
+        REDISPASS=" -a $REDISPASS"
+    fi
+    CLIEXEC="${ROOT_PATH}/redis/bin/redis-cli -p $REDISPORT$REDISPASS"
+    echo $CLIEXEC
+    ${CLIEXEC}
+}
+
+mw_venv(){
+    cd ${ROOT_PATH}/mdserver-web && source bin/activate
+}
+
+mw_clean_lib(){
+    cd ${ROOT_PATH}/mdserver-web && rm -rf lib
+    cd ${ROOT_PATH}/mdserver-web && rm -rf lib64
+    cd ${ROOT_PATH}/mdserver-web && rm -rf bin
+    cd ${ROOT_PATH}/mdserver-web && rm -rf include
 }
 
 case "$1" in
@@ -279,10 +480,21 @@ case "$1" in
     'install_app') mw_install_app;;
     'close_admin_path') mw_close_admin_path;;
     'unbind_domain') mw_unbind_domain;;
+    'unbind_ssl') mw_unbind_domain;;
     'debug') mw_debug;;
+    'mirror') mw_mirror;;
+    'db') mw_connect_mysql;;
+    'redis') mw_redis;;
+    'venv') mw_update_venv;;
+    'clean_lib') mw_clean_lib;;
     'default')
         cd $mw_path
         port=7200
+        scheme=http
+
+        if [ -f $mw_path/ssl/choose.pl ];then
+            scheme=https
+        fi
         
         if [ -f $mw_path/data/port.pl ];then
             port=$(cat $mw_path/data/port.pl)
@@ -301,14 +513,21 @@ case "$1" in
             auth_path=$(cat $mw_path/data/admin_path.pl)
         fi
 	    
-        if [ "$address" = "" ];then
+        if [ "$address" == "" ];then
             v4=$(python3 $mw_path/tools.py getServerIp 4)
             v6=$(python3 $mw_path/tools.py getServerIp 6)
 
             if [ "$v4" != "" ] && [ "$v6" != "" ]; then
-                address="MW-Panel-Url-Ipv4: http://$v4:$port$auth_path \nMW-Panel-Url-Ipv6: http://[$v6]:$port$auth_path"
+
+                if [ ! -f $mw_path/data/ipv6.pl ];then
+                    echo 'True' > $mw_path/data/ipv6.pl
+                    mw_stop
+                    mw_start
+                fi
+
+                address="MW-Panel-Url-Ipv4: ${scheme}://$v4:$port$auth_path \nMW-Panel-Url-Ipv6: ${scheme}://[$v6]:$port$auth_path"
             elif [ "$v4" != "" ]; then
-                address="MW-Panel-Url: http://$v4:$port$auth_path"
+                address="MW-Panel-Url: ${scheme}://$v4:$port$auth_path"
             elif [ "$v6" != "" ]; then
 
                 if [ ! -f $mw_path/data/ipv6.pl ];then
@@ -317,12 +536,12 @@ case "$1" in
                     mw_stop
                     mw_start
                 fi
-                address="MW-Panel-Url: http://[$v6]:$port$auth_path"
+                address="MW-Panel-Url: ${scheme}://[$v6]:$port$auth_path"
             else
-                address="MW-Panel-Url: http://you-network-ip:$port$auth_path"
+                address="MW-Panel-Url: ${scheme}://you-network-ip:$port$auth_path"
             fi
         else
-            address="MW-Panel-Url: http://$address:$port$auth_path"
+            address="MW-Panel-Url: ${scheme}://$address:$port$auth_path"
         fi
 
         show_panel_ip="$port|"
@@ -335,7 +554,7 @@ case "$1" in
         # echo -e "password: $password"
         echo -e "\033[33mWarning:\033[0m"
         echo -e "\033[33mIf you cannot access the panel. \033[0m"
-        echo -e "\033[33mrelease the following port (${show_panel_ip}888|80|443|22) in the security group.\033[0m"
+        echo -e "\033[33mrelease the following port (${show_panel_ip}80|443|22) in the security group.\033[0m"
         echo -e "=================================================================="
         ;;
     *)

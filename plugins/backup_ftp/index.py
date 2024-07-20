@@ -14,6 +14,7 @@ if sys.platform != "darwin":
 
 sys.path.append(os.getcwd() + "/class/core")
 import mw
+import db
 
 _ver = sys.version_info
 is_py2 = (_ver[0] == 2)
@@ -172,6 +173,15 @@ def deleteFile():
         return mw.returnJson(True, "删除成功")
     return mw.returnJson(False, "删除失败")
 
+def findPathName(path, filename):
+    f = os.scandir(path)
+    l = []
+    for ff in f:
+        t = {}
+        if ff.name.find(filename) > -1:
+            t['filename'] = path + '/' + ff.name
+            l.append(t)
+    return l
 
 def backupAllFunc(stype):
     os.chdir(mw.getRunDir())
@@ -185,6 +195,36 @@ def backupAllFunc(stype):
         "path": "path",
     }
 
+    backups = []
+    sql = db.Sql()
+
+    # print("stype:", stype)
+    # 提前获取-清理多余备份
+    if stype == 'site':
+        pid = sql.table('sites').where('name=?', (name,)).getField('id')
+        backups = sql.table('backup').where(
+            'type=? and pid=?', ('0', pid)).field('id,filename').select()
+    if stype == 'database':
+        db_path = mw.getServerDir() + '/mysql'
+        pid = mw.M('databases').dbPos(db_path, 'mysql').where(
+            'name=?', (name,)).getField('id')
+        backups = sql.table('backup').where(
+            'type=? and pid=?', ('1', pid)).field('id,filename').select()
+    if stype == 'path':
+        backup_dir = mw.getBackupDir()
+        backup_path = backup_dir + '/path'
+        _name = 'path_{}'.format(os.path.basename(name))
+        backups = findPathName(backup_path, _name)
+
+    # 其他类型关系性数据库(mysql类的)
+    if stype.find('database_') > -1:
+        plugin_name = stype.replace('database_', '')
+        db_path = mw.getServerDir() + '/' + plugin_name
+        pid = mw.M('databases').dbPos(db_path, 'mysql').where(
+            'name=?', (name,)).getField('id')
+        backups = sql.table('backup').where(
+            'type=? and pid=?', ('1', pid)).field('id,filename').select()
+
     args = stype + " " + name + " " + num
     cmd = 'python3 ' + mw.getRunDir() + '/scripts/backup.py ' + args
     if stype.find('database_') > -1:
@@ -194,33 +234,52 @@ def backupAllFunc(stype):
             '/scripts/backup.py ' + args
 
     os.system(cmd)
-    # 开始执行上传信息
 
-    bk_prefix = prefix_dict[stype]
-    bk_name = stype
+    # 开始执行上传信息.
+
     if stype.find('database_') > -1:
         bk_name = 'database'
         plugin_name = stype.replace('database_', '')
         bk_prefix = plugin_name + '/db'
+        stype = 'database'
+    else:
+        bk_prefix = prefix_dict[stype]
+        bk_name = stype
 
     find_path = mw.getBackupDir() + '/' + bk_name + '/' + bk_prefix + '_' + name
+    if stype == 'path':
+        _name = 'path_{}'.format(os.path.basename(name))
+        find_path = mw.getBackupDir() + '/path/'+_name
+
     find_new_file = "ls " + find_path + \
         "_* | grep '.gz' | cut -d \  -f 1 | awk 'END {print}'"
 
     filename = mw.execShell(find_new_file)[0].strip()
     if filename == "":
         mw.echoInfo("not find upload file!")
-        return False
+        return ''
 
+    mw.echoInfo("准备上传文件 {}".format(filename))
     ftp = FtpPSClient()
     ftp.uploadFile(filename, stype)
 
-    return True
+    # print(backups)
+    backups = sorted(backups, key=lambda x: x['filename'], reverse=False)
+    mw.echoStart('开始删除远程备份')
+    num = int(num)
+    sep = len(backups) - num
+    if sep > -1:
+        for backup in backups:
+            fn = os.path.basename(backup['filename'])
+            object_name = ftp.buildDirName(stype, fn)
+            ftp.deleteFile(object_name)
+            mw.echoInfo("已清理远程过期备份文件：" + object_name)
+            sep -= 1
+            if sep < 0:
+                break
+    mw.echoEnd('结束删除远程备份')
 
-
-def backupSite():
-    # 备份站点
-    pass
+    return ''
 
 
 def in_array(name, arr=[]):

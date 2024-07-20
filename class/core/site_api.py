@@ -72,34 +72,77 @@ class site_api:
             mw.execShell("mkdir -p " + self.sslLetsDir +
                          " && chmod -R 755 " + self.sslLetsDir)
 
+    def runHook(self, hook_name, func_name):
+        # 站点操作Hook
+        hook_file = 'data/hook_site_cb.json'
+        hook_cfg = []
+        if os.path.exists(hook_file):
+            t = mw.readFile(hook_file)
+            hook_cfg = json.loads(t)
+
+        hook_num = len(hook_cfg)
+        if hook_num == 0:
+            return
+
+        import plugins_api
+        pa = plugins_api.plugins_api()
+
+        for x in range(hook_num):
+            hook_data = hook_cfg[x]
+            if func_name in hook_data:
+                app_name = hook_data["name"]
+                run_func = hook_data[func_name]['func']
+                # print(app_name, run_func)
+                pa.run(app_name, run_func)
+        return True
+
     ##### ----- start ----- ###
     def listApi(self):
         limit = request.form.get('limit', '10')
         p = request.form.get('p', '1')
         type_id = request.form.get('type_id', '0').strip()
+        search = request.form.get('search', '').strip()
 
         start = (int(p) - 1) * (int(limit))
 
-        siteM = mw.M('sites').field('id,name,path,status,ps,addtime,edate')
+        siteM = siteC = mw.M('sites').field('id,name,path,status,ps,addtime,edate,type_id')
+
+        sql_where = ''
+        if search != '':
+            sql_where = " name like '%" + search + "%' or ps like '%" + search + "%' "
+
+        if type_id != '' and int(type_id) >= 0 and search != '':
+            sql_where = sql_where + " and type_id=" + type_id + ""
         if type_id != '' and int(type_id) >= 0:
-            siteM.where('type_id=?', (type_id,))
+            sql_where = " type_id=" + type_id
 
-        _list = siteM.limit((str(start)) + ',' +
-                            limit).order('id desc').select()
+        if sql_where != '':
+            siteM.where(sql_where)
 
-        for i in range(len(_list)):
-            _list[i]['backup_count'] = mw.M('backup').where(
-                "pid=? AND type=?", (_list[i]['id'], 0)).count()
+        _list = siteM.limit((str(start)) + ',' +limit).order('id desc').select()
+        if _list != None:
+            for i in range(len(_list)):
+                _list[i]['backup_count'] = mw.M('backup').where("pid=? AND type=?", (_list[i]['id'], 0)).count()
 
         _ret = {}
         _ret['data'] = _list
 
-        count = siteM.count()
+        if sql_where != '':
+            count = siteC.where(sql_where).count()
+        else:
+            count = siteC.count()
+
         _page = {}
         _page['count'] = count
         _page['tojs'] = 'getWeb'
         _page['p'] = p
         _page['row'] = limit
+
+        page_args_tpl = ''
+        page_args_tpl += ','+type_id+''
+        if search != '':
+            page_args_tpl += ',"'+search+'"'
+        _page['args_tpl'] = page_args_tpl
 
         _ret['page'] = mw.getPage(_page)
         return mw.getJson(_ret)
@@ -550,7 +593,7 @@ class site_api:
                 return mw.returnJson(False, '使用中,先关闭再删除')
             mw.execShell('rm -rf ' + ssl_lets_dir)
         elif ssl_type == 'acme':
-            ssl_acme_dir = mw.getAcmeDir() + '/' + site_name
+            ssl_acme_dir = mw.getAcmeDomainDir(site_name)
             csr_acme_path = ssl_acme_dir + '/fullchain.cer'  # 生成证书路径
             if mw.md5(mw.readFile(csr_acme_path)) == mw.md5(mw.readFile(csr_path)):
                 return mw.returnJson(False, '使用中,先关闭再删除')
@@ -587,9 +630,9 @@ class site_api:
             csr_path = self.sslLetsDir + '/' + site_name + '/fullchain.pem'  # 生成证书路径
             key_path = self.sslLetsDir + '/' + site_name + '/privkey.pem'    # 密钥文件路径
         elif ssl_type == 'acme':
-            csr_path = mw.getAcmeDir() + '/' + site_name + '/fullchain.cer'  # 生成证书路径
-            key_path = mw.getAcmeDir() + '/' + site_name + '/' + \
-                site_name + '.key'    # 密钥文件路径
+            acme_dir = mw.getAcmeDomainDir(site_name)
+            csr_path = acme_dir + '/fullchain.cer'  # 生成证书路径
+            key_path = acme_dir + '/' + site_name + '.key'    # 密钥文件路径
 
         key = mw.readFile(key_path)
         csr = mw.readFile(csr_path)
@@ -720,6 +763,8 @@ class site_api:
             conf = re.sub(rep, '', conf)
             rep = "\s+listen\s+\[\:\:\]\:443.*;"
             conf = re.sub(rep, '', conf)
+            rep = "\s+http2\s+on;"
+            conf = re.sub(rep, '', conf)
             mw.writeFile(file, conf)
 
         msg = mw.getInfo('网站[{1}]关闭SSL成功!', (siteName,))
@@ -751,6 +796,9 @@ class site_api:
                 mw.execShell('echo "lets" > "' + path + '/README"')
         elif ssl_type == 'acme':
             ssl_acme_dir = mw.getAcmeDir() + '/' + site_name
+            if not os.path.exists(ssl_acme_dir):
+                ssl_acme_dir = mw.getAcmeDir() + '/' + site_name + '_ecc'
+
             acme_csrpath = ssl_acme_dir + '/fullchain.cer'
             acme_keypath = ssl_acme_dir + '/' + site_name + '.key'
             if mw.md5(mw.readFile(acme_csrpath)) == mw.md5(mw.readFile(csr_path)):
@@ -934,6 +982,9 @@ class site_api:
         siteInfo = mw.M('sites').where(
             'name=?', (siteName,)).field('id,name,path').find()
         path = self.getSitePath(siteName)
+        if path == '':
+            return mw.returnJson(False, '【'+siteName+'】配置文件,异常!')
+
         srcPath = siteInfo['path']
 
         # 检测acme是否安装
@@ -989,16 +1040,17 @@ class site_api:
         # print(cmd)
         result = mw.execShell(cmd)
 
-        src_path = acme_dir + '/' + domains[0]
+        src_path = mw.getAcmeDomainDir(domains[0])
         src_cert = src_path + '/fullchain.cer'
         src_key = src_path + '/' + domains[0] + '.key'
+        src_cert.replace("\*", "*")
 
         msg = '签发失败,您尝试申请证书的失败次数已达上限!<p>1、检查域名是否绑定到对应站点</p>\
             <p>2、检查域名是否正确解析到本服务器,或解析还未完全生效</p>\
             <p>3、如果您的站点设置了反向代理,或使用了CDN,请先将其关闭</p>\
             <p>4、如果您的站点设置了301重定向,请先将其关闭</p>\
             <p>5、如果以上检查都确认没有问题，请尝试更换DNS服务商</p>'
-        if not os.path.exists(src_cert.replace("\*", "*")):
+        if not os.path.exists(src_cert):
             data = {}
             data['err'] = result
             data['out'] = result[0]
@@ -1109,8 +1161,9 @@ class site_api:
         domains = request.form.get('domains', '')
         status = request.form.get('status', '')
         name = request.form.get('name', '')
+        none = request.form.get('none', '')
         sid = request.form.get('id', '')
-        return self.setSecurity(sid, name, fix, domains, status)
+        return self.setSecurity(sid, name, fix, domains, status, none)
 
     def getLogsApi(self):
         siteName = request.form.get('siteName', '')
@@ -1271,6 +1324,7 @@ class site_api:
             mw.M('domain').add('pid,name,port,addtime',
                                (pid, domain_name, domain_port, mw.getDate()))
 
+        self.runHook('site_cb', 'add')
         return mw.returnJson(True, '域名添加成功!')
 
     def addDirBindApi(self):
@@ -1394,13 +1448,15 @@ class site_api:
             data['data'] = mw.readFile(filename)
             data['rlist'] = []
             for ds in os.listdir(self.rewritePath):
+                if ds[0:1] == '.':
+                    continue
                 if ds == 'list.txt':
                     continue
                 data['rlist'].append(ds[0:len(ds) - 5])
             data['filename'] = filename
         return mw.getJson(data)
 
-        # 修改物理路径
+    # 修改物理路径
     def setPathApi(self):
         mid = request.form.get('id', '')
         path = request.form.get('path', '')
@@ -1827,19 +1883,16 @@ class site_api:
         if _id == '' or _siteName == '':
             return mw.returnJson(False, "必填项不能为空!")
 
-        _old_config = mw.readFile(
-            "{}/{}/{}.conf".format(self.proxyPath, _siteName, _id))
-        if _old_config == False:
-            return mw.returnJson(False, "非法操作")
-
-        mw.writeFile("{}/{}/{}.conf".format(self.proxyPath,
-                                            _siteName, _id), _config)
+        proxy_file = "{}/{}/{}.conf".format(self.proxyPath, _siteName, _id)
+        mw.backFile(proxy_file)
+        mw.writeFile(proxy_file, _config)
         rule_test = mw.checkWebConfig()
         if rule_test != True:
-            mw.writeFile("{}/{}/{}.conf".format(self.proxyPath,
-                                                _siteName, _id), _old_config)
+            mw.restoreFile(proxy_file)
+            mw.removeBackFile(proxy_file)
             return mw.returnJson(False, "OpenResty 配置测试不通过, 请重试: {}".format(rule_test))
 
+        mw.removeBackFile(proxy_file)
         self.operateRedirectConf(_siteName, 'start')
         mw.restartWeb()
         return mw.returnJson(True, "ok")
@@ -1880,21 +1933,20 @@ class site_api:
         _from = request.form.get('from', '')
         _to = request.form.get('to', '')
         _host = request.form.get('host', '')
+        _name = request.form.get('name', '')
         _open_proxy = request.form.get('open_proxy', '')
+        _open_cache = request.form.get('open_cache', '')
+        _cache_time = request.form.get('cache_time', '')
+        _id = request.form.get('id', '')
 
-        if _siteName == "" or _from == "" or _to == "" or _host == "":
+        # print(_name, _siteName, _from, _to, _host)
+        if _name == "" or _siteName == "" or _from == "" or _to == "" or _host == "":
             return mw.returnJson(False, "必填项不能为空")
-
-        data_path = self.getProxyDataPath(_siteName)
-        data_content = mw.readFile(
-            data_path) if os.path.exists(data_path) else ""
-        data = json.loads(data_content) if data_content != "" else []
 
         rep = "http(s)?\:\/\/([a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.)+([a-zA-Z0-9][a-zA-Z0-9]{0,62})+.?"
         if not re.match(rep, _to):
             return mw.returnJson(False, "错误的目标地址!")
 
-        # _to = _to.strip("/")
         # get host from url
         try:
             if _host == "$host":
@@ -1903,7 +1955,24 @@ class site_api:
         except:
             return mw.returnJson(False, "错误的目标地址")
 
-        # location ~* ^{from}(.*)$ {
+        proxy_site_path = self.getProxyDataPath(_siteName)
+        data_content = mw.readFile(
+            proxy_site_path) if os.path.exists(proxy_site_path) else ""
+        data = json.loads(data_content) if data_content != "" else []
+
+        proxy_action = 'add'
+        if _id == "":
+            _id = mw.md5("{}".format(_name))
+        else:
+            proxy_action = 'edit'
+
+        if proxy_action == "add":
+            for item in data:
+                if item["name"] == _name:
+                    return mw.returnJson(False, "名称重复!!")
+                if item["from"] == _from:
+                    return mw.returnJson(False, "代理目录已存在!!")
+
         tpl = "#PROXY-START\n\
 location ^~ {from} {\n\
     proxy_pass {to};\n\
@@ -1911,12 +1980,29 @@ location ^~ {from} {\n\
     proxy_set_header X-Real-IP $remote_addr;\n\
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n\
     proxy_set_header REMOTE-HOST $remote_addr;\n\
+    proxy_set_header Upgrade $http_upgrade;\n\
+    proxy_set_header Connection $connection_upgrade;\n\
+    proxy_http_version 1.1;\n\
     \n\
     add_header X-Cache $upstream_cache_status;\n\
-    proxy_ignore_headers Set-Cookie Cache-Control expires;\n\
-    add_header Cache-Control no-cache;\n\
     \n\
-    set $static_files_app 0;\n\
+     {proxy_cache}\n\
+}\n\
+# PROXY-END"
+
+        tpl_proxy_cache = "\n\
+    if ( $uri ~* \"\.(gif|png|jpg|css|js|woff|woff2)$\" )\n\
+    {\n\
+        expires {cache_time}m;\n\
+    }\n\
+    proxy_ignore_headers Set-Cookie Cache-Control expires;\n\
+    proxy_cache mw_cache;\n\
+    proxy_cache_key \"$host$uri$is_args$args\";\n\
+    proxy_cache_valid 200 304 301 302 {cache_time}m;\n\
+"
+
+        tpl_proxy_nocache = "\n\
+    set $static_files_app 0; \n\
     if ( $uri ~* \"\.(gif|png|jpg|css|js|woff|woff2)$\" )\n\
     {\n\
         set $static_files_app 1;\n\
@@ -1926,8 +2012,7 @@ location ^~ {from} {\n\
     {\n\
         add_header Cache-Control no-cache;\n\
     }\n\
-}\n\
-#PROXY-END"
+"
 
         # replace
         if _from[0] != '/':
@@ -1935,28 +2020,63 @@ location ^~ {from} {\n\
         tpl = tpl.replace("{from}", _from, 999)
         tpl = tpl.replace("{to}", _to)
         tpl = tpl.replace("{host}", _host, 999)
+        tpl = tpl.replace("{cache_time}", _cache_time, 999)
 
-        _id = mw.md5("{}+{}+{}".format(_from, _to, _siteName))
-        for item in data:
-            if item["id"] == _id:
-                return mw.returnJson(False, "已存在该规则!")
-            if item["from"] == _from:
-                return mw.returnJson(False, "代理目录已存在!")
-        data.append({
-            "from": _from,
-            "to": _to,
-            "host": _host,
-            "id": _id
-        })
+        if _open_cache == 'on':
+            tpl_proxy_cache = tpl_proxy_cache.replace(
+                "{cache_time}", _cache_time, 999)
+            tpl = tpl.replace("{proxy_cache}", tpl_proxy_cache, 999)
+        else:
+            tpl = tpl.replace("{proxy_cache}", tpl_proxy_nocache, 999)
 
-        conf_file = "{}/{}.conf".format(self.getProxyPath(_siteName), _id)
+
+        conf_proxy = "{}/{}.conf".format(self.getProxyPath(_siteName), _id)
+        conf_bk = "{}/{}.conf.txt".format(self.getProxyPath(_siteName), _id)
+        mw.writeFile(conf_proxy, tpl)
+
+        rule_test = mw.checkWebConfig()
+        if rule_test != True:
+            os.remove(conf_proxy)
+            return mw.returnJson(False, "OpenResty配置测试不通过, 请重试: {}".format(rule_test))
+
+        if proxy_action == "add":
+            # 添加代理
+            _id = mw.md5("{}".format(_name))
+            for item in data:
+                if item["name"] == _name:
+                    return mw.returnJson(False, "名称重复!")
+                if item["from"] == _from:
+                    return mw.returnJson(False, "代理目录已存在!")
+            data.append({
+                "name": _name,
+                "from": _from,
+                "to": _to,
+                "host": _host,
+                "open_cache": _open_cache,
+                "open_proxy": _open_proxy,
+                "cache_time": _cache_time,
+                "id": _id,
+            })
+        else:
+            # 修改代理
+            dindex = -1
+            for x in range(len(data)):
+                if data[x]["id"] == _id:
+                    dindex = x
+                    break
+            if dindex < 0:
+                return mw.returnJson(False, "异常请求")
+            data[dindex]['from'] = _from
+            data[dindex]['to'] = _to
+            data[dindex]['host'] = _host
+            data[dindex]['open_cache'] = _open_cache
+            data[dindex]['open_proxy'] = _open_proxy
+            data[dindex]['cache_time'] = _cache_time
+
         if _open_proxy != 'on':
-            conf_file = "{}/{}.conf.txt".format(
-                self.getProxyPath(_siteName), _id)
+            os.rename(conf_proxy, conf_bk)
 
-        mw.writeFile(data_path, json.dumps(data))
-        mw.writeFile(conf_file, tpl)
-
+        mw.writeFile(proxy_site_path, json.dumps(data))
         self.operateProxyConf(_siteName, 'start')
         mw.restartWeb()
         return mw.returnJson(True, "ok", {"hash": _id})
@@ -1987,10 +2107,10 @@ location ^~ {from} {\n\
                 self.getProxyPath(_siteName), _id)
             mw.execShell(cmd)
         except:
-            return mw.returnJson(False, "删除失败!")
+            return mw.returnJson(False, "删除反代失败!")
 
         mw.restartWeb()
-        return mw.returnJson(True, "删除成功!")
+        return mw.returnJson(True, "删除反代成功!")
 
     def getSiteTypesApi(self):
         # 取网站分类
@@ -2057,7 +2177,7 @@ location ^~ {from} {\n\
 
     ##### ----- end   ----- ###
 
-        # 域名编码转换
+    # 域名编码转换
     def toPunycode(self, domain):
         import re
         if sys.version_info[0] == 2:
@@ -2065,7 +2185,7 @@ location ^~ {from} {\n\
         tmp = domain.split('.')
         newdomain = ''
         for dkey in tmp:
-                # 匹配非ascii字符
+            # 匹配非ascii字符
             match = re.search(u"[\x80-\xff]+", dkey)
             if not match:
                 newdomain += dkey + '.'
@@ -2100,7 +2220,10 @@ location ^~ {from} {\n\
         if os.path.exists(file):
             conf = mw.readFile(file)
             rep = '\s*root\s*(.+);'
-            path = re.search(rep, conf).groups()[0]
+            find_cnf = re.search(rep, conf)
+            if not find_cnf:
+                return ''
+            path = find_cnf.groups()[0]
             return path
         return ''
 
@@ -2199,9 +2322,15 @@ location ^~ {from} {\n\
     def getSitePhpVersion(self, siteName):
         conf = mw.readFile(self.getHostConf(siteName))
         rep = "enable-php-(.*)\.conf"
-        tmp = re.search(rep, conf).groups()
+        find_php_cnf = re.search(rep, conf)
+
+        def_pver = '00'
+        if find_php_cnf:
+            tmp = find_php_cnf.groups()
+            def_pver = tmp[0]
+            
         data = {}
-        data['phpversion'] = tmp[0]
+        data['phpversion'] = def_pver
         return mw.getJson(data)
 
     def getIndex(self, sid):
@@ -2330,9 +2459,28 @@ location ^~ {from} {\n\
             tmp = re.search(rep, conf).group()
             data['fix'] = re.search(
                 "\(.+\)\$", tmp).group().replace('(', '').replace(')$', '').replace('|', ',')
-            data['domains'] = ','.join(re.search(
-                "valid_referers\s+none\s+blocked\s+(.+);\n", tmp).groups()[0].split())
-            data['status'] = True
+
+            data['status'] = False
+            data['none'] = False
+
+            valid_referers = re.search(
+                "valid_referers\s+(.+);\n", tmp)
+            valid_referers_none = re.search(
+                "valid_referers\s+none\s+blocked\s+(.+);\n", tmp)
+
+            if valid_referers or valid_referers_none:
+                data['status'] = True
+
+            if valid_referers_none:
+                domain_t = valid_referers_none.groups()[0].split()
+                data['domains'] = ','.join(domain_t)
+                data['none'] = True
+            elif valid_referers:
+                domain_t = valid_referers.groups()[0].split()
+                data['domains'] = ','.join(domain_t)
+                data['none'] = False
+
+            # print(data)
         else:
             data['fix'] = 'jpg,jpeg,gif,png,js,css'
             domains = mw.M('domain').where(
@@ -2342,19 +2490,27 @@ location ^~ {from} {\n\
                 tmp.append(domain['name'])
             data['domains'] = ','.join(tmp)
             data['status'] = False
+            data['none'] = False
         return mw.getJson(data)
 
-    def setSecurity(self, sid, name, fix, domains, status):
+    def setSecurity(self, sid, name, fix, domains, status, none=''):
         if len(fix) < 2:
             return mw.returnJson(False, 'URL后缀不能为空!')
         file = self.getHostConf(name)
         if os.path.exists(file):
             conf = mw.readFile(file)
-            if conf.find('SECURITY-START') != -1:
+            if status == 'false':
                 rep = "\s{0,4}#SECURITY-START(\n|.){1,500}#SECURITY-END\n?"
                 conf = re.sub(rep, '', conf)
                 mw.writeLog('网站管理', '站点[' + name + ']已关闭防盗链设置!')
             else:
+                rep = "\s{0,4}#SECURITY-START(\n|.){1,500}#SECURITY-END\n?"
+                conf = re.sub(rep, '', conf)
+
+                valid_referers = domains.strip().replace(',', ' ')
+                if none == 'true':
+                    valid_referers = 'none blocked ' + valid_referers
+
                 pre_path = self.setupPath + "/php/conf"
                 re_path = "include\s+" + pre_path + "/enable-php-"
                 rconf = '''#SECURITY-START 防盗链配置
@@ -2362,13 +2518,13 @@ location ^~ {from} {\n\
     {
         expires      30d;
         access_log /dev/null;
-        valid_referers none blocked %s;
+        valid_referers %s;
         if ($invalid_referer){
            return 404;
         }
     }
     #SECURITY-END
-    include %s/enable-php-''' % (fix.strip().replace(',', '|'), domains.strip().replace(',', ' '), pre_path)
+    include %s/enable-php-''' % (fix.strip().replace(',', '|'), valid_referers, pre_path)
                 conf = re.sub(re_path, rconf, conf)
                 mw.writeLog('网站管理', '站点[' + name + ']已开启防盗链!')
             mw.writeFile(file, conf)
@@ -2377,7 +2533,7 @@ location ^~ {from} {\n\
 
     def getPhpVersion(self):
         phpVersions = ('00', '52', '53', '54', '55',
-                       '56', '70', '71', '72', '73', '74', '80', '81', '82')
+                       '56', '70', '71', '72', '73', '74', '80', '81', '82', '83')
         data = []
         for val in phpVersions:
             tmp = {}
@@ -2506,6 +2662,10 @@ location ^~ {from} {\n\
         mw.writeFile(rewrite_file, '')
 
     def add(self, webname, port, ps, path, version):
+        site_root_dir = mw.getWwwDir()
+        if site_root_dir == path.rstrip('/'):
+            return mw.returnJson(False, '不要以网站根目录创建站点!')
+
         siteMenu = json.loads(webname)
         self.siteName = self.toPunycode(
             siteMenu['domain'].strip().split(':')[0]).strip()
@@ -2529,16 +2689,18 @@ location ^~ {from} {\n\
         self.createRootDir(self.sitePath)
         self.nginxAddConf()
 
+        mw.M('domain').add('pid,name,port,addtime',
+                           (pid, self.siteName, self.sitePort, mw.getDate()))
+
         # 添加更多域名
         for domain in siteMenu['domainlist']:
             self.addDomain(domain, self.siteName, pid)
 
-        mw.M('domain').add('pid,name,port,addtime',
-                           (pid, self.siteName, self.sitePort, mw.getDate()))
-
         data = {}
         data['siteStatus'] = False
         mw.restartWeb()
+
+        self.runHook('site_cb', 'add')
         return mw.returnJson(True, '添加成功')
 
     def deleteWSLogs(self, webname):
@@ -2588,6 +2750,8 @@ location ^~ {from} {\n\
             mw.execShell('rm -rf ' + ssl_acme_dir)
 
         mw.M('sites').where("id=?", (sid,)).delete()
+        mw.M('domain').where("pid=?", (sid,)).delete()
+        mw.M('domain').where("name=?", (webname,)).delete()
 
         # binding domain delete
         binding_list = mw.M('binding').field(
@@ -2605,6 +2769,8 @@ location ^~ {from} {\n\
 
         mw.M('binding').where("pid=?", (sid,)).delete()
         mw.restartWeb()
+
+        self.runHook('site_cb', 'delete')
         return mw.returnJson(True, '站点删除成功!')
 
     def setEndDate(self, sid, edate):
@@ -2619,19 +2785,36 @@ location ^~ {from} {\n\
         file = self.getHostConf(siteName)
         conf = mw.readFile(file)
 
+        version = ''
+        version_file_pl = mw.getServerDir() + '/openresty/version.pl'
+        if os.path.exists(version_file_pl):
+            version = mw.readFile(version_file_pl)
+            version = version.strip()
+
+
         keyPath = self.sslDir + '/' + siteName + '/privkey.pem'
         certPath = self.sslDir + '/' + siteName + '/fullchain.pem'
         if conf:
             if conf.find('ssl_certificate') == -1:
+                # ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:HIGH:!aNULL:!MD5:!RC4:!DHE;
+                # add_header Alt-Svc 'h3=":443";ma=86400,h3-29=":443";ma=86400';
+                http3Header = """
+    add_header Strict-Transport-Security "max-age=63072000";
+    add_header Alt-Svc 'h3=":443";ma=86400';
+"""
+                if version != '1.25.3.1':
+                    http3Header = '';
+
                 sslStr = """#error_page 404/404.html;
     ssl_certificate    %s;
     ssl_certificate_key  %s;
-    ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
-    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:HIGH:!aNULL:!MD5:!RC4:!DHE;
+    ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305;
     ssl_prefer_server_ciphers on;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
-    error_page 497  https://$host$request_uri;""" % (certPath, keyPath)
+    %s
+    error_page 497  https://$host$request_uri;""" % (certPath, keyPath, http3Header)
             if(conf.find('ssl_certificate') != -1):
                 return mw.returnData(True, 'SSL开启成功!')
 
@@ -2641,8 +2824,18 @@ location ^~ {from} {\n\
             tmp = re.findall(rep, conf)
             if not mw.inArray(tmp, '443'):
                 listen = re.search(rep, conf).group()
-                http_ssl = "\n\tlisten 443 ssl http2;"
-                http_ssl = http_ssl + "\n\tlisten [::]:443 ssl http2;"
+                
+                if version == '1.25.3.1':
+                    http_ssl = "\n\tlisten 443 ssl;"
+                    http_ssl = http_ssl + "\n\tlisten [::]:443 ssl;"
+                    http_ssl = http_ssl + "\n\tlisten 443 quic;"
+                    http_ssl = http_ssl + "\n\tlisten [::]:443 quic;"
+                    http_ssl = http_ssl + "\n\thttp2 on;"
+                else:
+                    http_ssl = "\n\tlisten 443 ssl http2;"
+                    http_ssl = http_ssl + "\n\tlisten [::]:443 ssl http2;"
+
+
                 conf = conf.replace(listen, listen + http_ssl)
 
             mw.backFile(file)
@@ -2654,7 +2847,7 @@ location ^~ {from} {\n\
 
         self.saveCert(keyPath, certPath)
 
-        msg = mw.getInfo('网站[{1}]开启SSL成功!', siteName)
+        msg = mw.getInfo('网站[{1}]开启SSL成功!', (siteName,))
         mw.writeLog('网站管理', msg)
 
         mw.restartWeb()
@@ -2713,9 +2906,4 @@ location ^~ {from} {\n\
         mw.execShell("chattr +i " + filename)
 
         return mw.returnJson(True, '已打开防跨站设置!')
-
-    # 转换时间
-    def strfToTime(self, sdate):
-        import time
-        return time.strftime('%Y-%m-%d', time.strptime(sdate, '%b %d %H:%M:%S %Y %Z'))
-    # ssl相关方法 end
+# ssl相关方法 end

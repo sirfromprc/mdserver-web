@@ -85,6 +85,7 @@ def migrateSiteHotLogs(site_name, query_date):
         import shutil
         print("coping {} to {} ...".format(hot_db, hot_db_tmp))
         mw.writeFile(migrating_flag, "yes")
+        time.sleep(3)
         shutil.copy(hot_db, hot_db_tmp)
         if not os.path.exists(hot_db_tmp):
             return mw.returnMsg(False, "migrating fail, copy tmp file!")
@@ -135,10 +136,11 @@ def migrateSiteHotLogs(site_name, query_date):
         save_day = gcfg['global']["save_day"]
         print("delete historical data {} days ago...".format(save_day))
         time_now = time.localtime()
-        save_timestamp = time.mktime(
-            (time_now.tm_year, time_now.tm_mon, time_now.tm_mday - save_day, 0, 0, 0, 0, 0, 0))
-        delete_sql = "delete from site_logs where time <= {}".format(
+        save_timestamp = time.mktime((time_now.tm_year, time_now.tm_mon, time_now.tm_mday - save_day, 0, 0, 0, 0, 0, 0))
+        delete_sql = "delete from web_logs where time <= {}".format(
             save_timestamp)
+        print('delete history_logs')
+        print(delete_sql)
         history_logs_conn.execute(delete_sql)
         history_logs_conn.commit()
 
@@ -182,6 +184,11 @@ def migrateSiteHotLogs(site_name, query_date):
             os.remove(hot_db_tmp)
 
     print("{} logs migrate ok.".format(site_name))
+
+    if not mw.isAppleSystem():
+        mw.execShell("chown -R www:www " + getServerDir())
+
+    mw.opWeb('restart')
     return mw.returnMsg(True, "{} logs migrate ok".format(site_name))
 
 

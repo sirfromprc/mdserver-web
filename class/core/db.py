@@ -42,7 +42,12 @@ class Sql():
                 self.__DB_CONN = sqlite3.connect(self.__DB_FILE)
                 self.__DB_CONN.text_factory = str
         except Exception as ex:
+            # print(mw.getTracebackInfo())
             return "error: " + str(ex)
+
+    def changeTextFactoryToBytes(self):
+        self.__DB_CONN.text_factory = bytes
+        return True
 
     def autoTextFactory(self):
         if sys.version_info[0] == 3:
@@ -56,8 +61,8 @@ class Sql():
         self.__DB_FILE = 'data/' + name + '.db'
         return self
 
-    def dbPos(self, path, name):
-        self.__DB_FILE = path + '/' + name + '.db'
+    def dbPos(self, path, name, suffix_name = 'db'):
+        self.__DB_FILE = path + '/' + name + '.' + suffix_name
         return self
 
     def table(self, table):
@@ -65,7 +70,7 @@ class Sql():
         self.__DB_TABLE = table
         return self
 
-    def where(self, where, param):
+    def where(self, where, param=()):
         # WHERE条件
         if where:
             self.__OPT_WHERE = " WHERE " + where
@@ -151,7 +156,9 @@ class Sql():
         try:
             sql = "SELECT " + self.__OPT_FIELD + " FROM " + self.__DB_TABLE + \
                 self.__OPT_WHERE + self.__OPT_GROUP + self.__OPT_ORDER + self.__OPT_LIMIT
-            # print(sql, self.__OPT_PARAM)
+
+            if os.path.exists('data/debug.pl'):
+                print(sql, self.__OPT_PARAM)
             result = self.__DB_CONN.execute(sql, self.__OPT_PARAM)
             data = result.fetchall()
             # 构造字曲系列
@@ -348,7 +355,7 @@ class Sql():
         except Exception as ex:
             return "error: " + str(ex)
 
-    def query(self, sql, param):
+    def query(self, sql, param=()):
         # 执行SQL语句返回数据集
         self.__getConn()
         try:

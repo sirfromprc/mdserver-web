@@ -191,8 +191,10 @@ def pSqliteDb(dbname='web_logs', site_name='unset', name="logs"):
         conn = mw.M(dbname).dbPos(db_dir, name)
 
     conn.execute("PRAGMA synchronous = 0")
-    conn.execute("PRAGMA page_size = 4096")
+    conn.execute("PRAGMA cache_size = 8000")
+    conn.execute("PRAGMA page_size = 32768")
     conn.execute("PRAGMA journal_mode = wal")
+    conn.execute("PRAGMA journal_size_limit = 1073741824")
     return conn
 
 
@@ -263,6 +265,8 @@ def initDreplace():
     loadLuaSiteFile()
     loadDebugLogFile()
 
+    if not mw.isAppleSystem():
+        mw.execShell("chown -R www:www " + getServerDir())
     return 'ok'
 
 
@@ -276,9 +280,6 @@ def start():
 
     import tool_task
     tool_task.createBgTask()
-
-    if not mw.isAppleSystem():
-        mw.execShell("chown -R www:www " + getServerDir())
 
     # issues:326
     luaRestart()
@@ -653,17 +654,19 @@ def getLogsRealtimeInfo():
     '''
     import datetime
     args = getArgs()
-    check = checkArgs(args, ['site', 'type'])
+    check = checkArgs(args, ['site', 'type','second'])
     if not check[0]:
         return check[1]
 
     domain = args['site']
     dtype = args['type']
+    second = int(args['second'])
+
 
     conn = pSqliteDb('web_logs', domain)
     timeInt = time.mktime(datetime.datetime.now().timetuple())
 
-    conn = conn.where("time>=?", (int(timeInt) - 10,))
+    conn = conn.where("time>=?", (int(timeInt) - second,))
 
     field = 'time,body_length'
     field_sum = toSumField(field.replace("time,", ""))
@@ -701,8 +704,8 @@ def attacHistoryLogHack(conn, site_name, query_date='today'):
 
 def getLogsList():
     args = getArgs()
-    check = checkArgs(args, ['page', 'page_size',
-                             'site', 'method', 'status_code', 'spider_type', 'query_date', 'search_uri'])
+    check = checkArgs(args, ['page', 'page_size','site', 'method', 
+            'status_code', 'spider_type', 'request_time', 'query_date', 'search_uri'])
     if not check[0]:
         return check[1]
 
@@ -712,9 +715,13 @@ def getLogsList():
     tojs = args['tojs']
     method = args['method']
     status_code = args['status_code']
+    request_time = args['request_time']
+    request_size = args['request_size']
     spider_type = args['spider_type']
     query_date = args['query_date']
     search_uri = args['search_uri']
+    referer = args['referer']
+    ip = args['ip']
     setDefaultSite(domain)
 
     limit = str(page_size) + ' offset ' + str(page_size * (page - 1))
@@ -725,11 +732,36 @@ def getLogsList():
     conn = conn.field(field)
     conn = conn.where("1=1", ())
 
+    if referer != 'all':
+        if referer == '1':
+            conn = conn.andWhere("referer <> ? ", ('',))
+        elif referer == '-1':
+            conn = conn.andWhere("referer is null ", ())
+
+    if ip != '':
+        conn = conn.andWhere("ip=?", (ip,))
+
     if method != "all":
         conn = conn.andWhere("method=?", (method,))
 
     if status_code != "all":
         conn = conn.andWhere("status_code=?", (status_code,))
+
+    if request_time != "all":
+        request_time_s = request_time.strip().split('-')
+        # print(request_time_s)
+        if len(request_time_s) == 2:
+            conn = conn.andWhere("request_time>=? and request_time<?", (request_time_s[0],request_time_s[1],))
+        if len(request_time_s) == 1:
+            conn = conn.andWhere("request_time>=?", (request_time,))
+
+    if request_size != "all":
+        request_size_s = request_size.strip().split('-')
+        # print(int(request_size_s[0])*1024)
+        if len(request_size_s) == 2:
+            conn = conn.andWhere("body_length>=? and body_length<?", (int(request_size_s[0])*1024,int(request_size_s[1])*1024,))
+        if len(request_size_s) == 1:
+            conn = conn.andWhere("body_length>=?", (int(request_size_s[0])*1024,))
 
     if spider_type == "normal":
         pass
@@ -759,7 +791,24 @@ def getLogsList():
 
     attacHistoryLogHack(conn, domain, query_date)
 
+    conn.changeTextFactoryToBytes()
     clist = conn.limit(limit).order('time desc').inquiry()
+
+    for x in range(len(clist)):
+        req_line = clist[x]
+        for cx in req_line:
+            v = req_line[cx]
+            if type(v) == bytes:
+                try:
+                    clist[x][cx] = v.decode('utf-8')
+                except Exception as e:
+                    v = str(v)
+                    v = v.replace("b'",'').strip("'")
+                    clist[x][cx] = v
+            else:
+                clist[x][cx] = v
+
+    # print(clist)
     count_key = "count(*) as num"
     count = conn.field(count_key).limit('').order('').inquiry()
     # print(count)

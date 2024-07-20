@@ -10,7 +10,7 @@
 简单的Linux面板,感谢BT.CN写出如此好的web管理软件。我一看到，就知道这是我一直想要的页面化管理方式。
 复制了后台管理界面，按照自己想要的方式写了一版。
 
-
+![EulerOS](https://img.shields.io/badge/LINUX-EulerOS-blue?style=for-the-badge&logo=EulerOS)
 ![Debian](https://img.shields.io/badge/LINUX-Debian-blue?style=for-the-badge&logo=Debian)
 ![Ubuntu](https://img.shields.io/badge/LINUX-Ubuntu-blue?style=for-the-badge&logo=Ubuntu)
 ![Fedora](https://img.shields.io/badge/LINUX-Fedora-blue?style=for-the-badge&logo=Fedora)
@@ -18,7 +18,7 @@
 
 
 [![Wiki](https://img.shields.io/badge/MW-Wiki-red?style=for-the-badge&logo=wiki)](https://github.com/midoks/mdserver-web/wiki)
-[![](https://data.jsdelivr.com/v1/package/gh/midoks/mdserver-web/badge?style=for-the-badge)](https://www.jsdelivr.com/package/gh/midoks/mdserver-web)
+[![jsdelivr](https://data.jsdelivr.com/v1/package/gh/midoks/mdserver-web/badge)](https://www.jsdelivr.com/package/gh/midoks/mdserver-web)
 
 * SSH终端工具
 * 面板收藏功能
@@ -29,15 +29,23 @@
 基本上可以使用,后续会继续优化!欢迎提供意见！
 
 - 吹水组 - https://t.me/mdserver_web
+- 交流论坛 - https://bbs.midoks.icu
+- discord - https://discord.gg/3zXk4mES
+```
+如果出现问题，最好私给我面板信息。不要让我猜。如果不提供，不要提出问题，自行解决。  — 座右铭
+Talk is cheap, show me the code.  -- linus
+```
+
 - [兼容性测试报告](/compatibility.md)
-- [常用命令说明](/cmd.md)
+- [常用命令说明](/cmd.md) [ mw default ] [ mw update_dev ]
 
 ### 主要插件介绍
 
 * OpenResty - 轻量级，占有内存少，并发能力强。
-* PHP[53-82] - PHP是世界上最好的编程语言。
+* PHP[53-83] - PHP是世界上最好的编程语言。
 * MySQL - 一种关系数据库管理系统。
 * MariaDB - 是MySQL的一个重要分支。
+* MySQL[APT/YUM] - 一种关系数据库管理系统。
 * MongoDB - 一种非关系NOSQL数据库管理系统。
 * phpMyAdmin - 著名Web端MySQL管理工具。
 * Memcached - 一个高性能的分布式内存对象缓存系统。
@@ -58,6 +66,10 @@
 - 插件地址 - https://github.com/mw-plugin
 - 开发文档 - https://github.com/midoks/mdserver-web/wiki/插件开发
 
+## 其他插件
+
+- OP鉴权 - https://github.com/mw-plugin/op_auth
+
 
 # Note
 
@@ -66,13 +78,19 @@ phpMyAdmin[4.4.15]支持MySQL[5.5-5.7]
 phpMyAdmin[5.2.0]支持MySQL[8.0]
 
 PHP[53-72]支持phpMyAdmin[4.4.15]
-PHP[72-81]支持phpMyAdmin[5.2.0]
+PHP[72-83]支持phpMyAdmin[5.2.0]
 ```
+
+# 郑重声明
+
+不卖、不会监控(统计使用除外)、更不会注入病毒,大家使用方便(望大家不吝捐赠)。
+
+- https://www.youtube.com/watch?v=2taa5K-Jmmw
+
 
 # 特别赞助
 
-- [找资源 - 阿里云盘资源搜索引擎](https://zhaoziyuan.la/)
-- [奈飞丝 - 奈飞中国 Netflix MOD首发](https://naifeis.com/index.php#/register?code=k7P7V6Ur)
+- [找资源 - 阿里云盘资源搜索引擎](https://zhaoziyuan1.cc)
 
 # AD - VPS推荐 - 🙏
 
@@ -84,43 +102,36 @@ PHP[72-81]支持phpMyAdmin[5.2.0]
 
 # Docker
 
-- 由[DDSRem](https://github.com/DDSRem)开发维护。
-- https://hub.docker.com/r/ddsderek/mw-server
+- 由[DDS-Derek](https://github.com/DDS-Derek)开发维护。
+- https://github.com/DDS-Derek/mdserver-web-Docker
 
 ```
 docker run -itd --name mw-server --privileged=true -p 7200:7200 -p 80:80 -p 443:443 -p 888:888 ddsderek/mw-server:latest
 ```
 
 
-### 版本更新 0.12.1
+### 版本更新 0.17.1
 
-* mysql/mariadb/mysql-apt/mysql-yum增加新的同步方式[同步账户]。
-* pureftp安装时自动放行端口。
-* 面板ssl，添加【申请Lets证书】功能。
-* 站点子域名绑定优化。
-* 修复添加数据库名字判断。
-* 增加PHP52的隐藏和显示指令。
-* 各种细节优化。
-
+- 任务管理器-插件。
 
 ### JSDelivr安装地址
 
 - 初始安装
 
 ```
-curl -fsSL https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/scripts/install.sh | bash
+curl --insecure -fsSL https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/scripts/install.sh | bash
 ```
 
 - 直接更新
 
 ```
-curl -fsSL https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/scripts/update.sh | bash
+curl --insecure -fsSL https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/scripts/update.sh | bash
 ```
 
 - 卸载脚本
 
 ```
-wget -O uninstall.sh https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/scripts/uninstall.sh && bash uninstall.sh
+wget --no-check-certificate -O uninstall.sh https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/scripts/uninstall.sh && bash uninstall.sh
 ```
 
 ### 备用地址
@@ -128,20 +139,20 @@ wget -O uninstall.sh https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/scri
 - 初始安装
 
 ```
-curl -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/master/scripts/install.sh | bash
-
+curl --insecure -fsSL https://raw.githubusercontent.com/midoks/mdserver-web/master/scripts/install.sh | bash
+curl --insecure -fsSL https://code.midoks.icu/midoks/mdserver-web/raw/branch/master/scripts/install.sh | bash
 ```
 
 - 直接更新
 
 ```
-curl -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/master/scripts/update.sh | bash
+curl --insecure -fsSL https://raw.githubusercontent.com/midoks/mdserver-web/master/scripts/update.sh | bash
 ```
 
 - 卸载脚本
 
 ```
-wget -O uninstall.sh https://raw.githubusercontent.com/midoks/mdserver-web/master/scripts/uninstall.sh && bash uninstall.sh
+wget --no-check-certificate -O uninstall.sh https://raw.githubusercontent.com/midoks/mdserver-web/master/scripts/uninstall.sh && bash uninstall.sh
 ```
 
 
@@ -150,22 +161,24 @@ wget -O uninstall.sh https://raw.githubusercontent.com/midoks/mdserver-web/maste
 - 需已经安装mdserver-web
 
 ```
-curl -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/quick/app.sh | bash
+curl --insecure -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/quick/app.sh | bash
 ```
 
 
 ### DEV使用
 
 ```
-curl -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/install_dev.sh | bash
-curl -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/update_dev.sh | bash
+curl --insecure -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/install_dev.sh | bash
+curl --insecure -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/update_dev.sh | bash
 
-wget -O uninstall.sh https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/uninstall.sh && bash uninstall.sh
+wget --no-check-certificate -O install.sh https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/install.sh && bash install.sh
 
-curl -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/quick/debug.sh | bash
+wget --no-check-certificate -O uninstall.sh https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/uninstall.sh && bash uninstall.sh
 
-curl -fsSL https://gitee.com/midoks/mdserver-web/raw/dev/scripts/install_dev.sh | bash
-curl -fsSL https://gitee.com/midoks/mdserver-web/raw/dev/scripts/update_dev.sh | bash
+curl --insecure -fsSL  https://raw.githubusercontent.com/midoks/mdserver-web/dev/scripts/quick/debug.sh | bash
+
+curl --insecure -fsSL https://code.midoks.icu/midoks/mdserver-web/raw/branch/dev/scripts/install_dev.sh | bash
+curl --insecure -fsSL https://code.midoks.icu/midoks/mdserver-web/raw/branch/dev/scripts/update_dev.sh | bash
 ```
 
 ### 捐赠地址 USDT（TRC20）
@@ -175,9 +188,9 @@ TVbNgrpeGBGZVm5gTLa21ADP7RpnPFhjya
 日行一善，以后必定大富大贵
 
 
-### 微信赞助
+### 支付宝赞助
 
-[![截图](https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/route/static/img/weixin_zz.jpg)](https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/route/static/img/weixin_zz.jpg)
+[![截图](https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/route/static/img/alipay_zz.png)](https://cdn.jsdelivr.net/gh/midoks/mdserver-web@latest/route/static/img/alipay_zz.png)
 
 
 ### 无图不真相

@@ -1,14 +1,3 @@
-
-function str2Obj(str){
-    var data = {};
-    kv = str.split('&');
-    for(i in kv){
-        v = kv[i].split('=');
-        data[v[0]] = v[1];
-    }
-    return data;
-}
-
 function phpPost(method, version, args,callback){
     var loadT = layer.msg('正在获取...', { icon: 16, time: 0, shade: 0.3 });
 
@@ -18,7 +7,7 @@ function phpPost(method, version, args,callback){
     req_data['version'] = version;
  
     if (typeof(args) == 'string'){
-        req_data['args'] = JSON.stringify(str2Obj(args));
+        req_data['args'] = JSON.stringify(toArrayObject(args));
     } else {
         req_data['args'] = JSON.stringify(args);
     }
@@ -43,10 +32,11 @@ function phpPostCallbak(method, version, args,callback){
     var req_data = {};
     req_data['name'] = 'php-apt';
     req_data['func'] = method;
+    req_data['script']='index_php_apt';
     args['version'] = version;
  
     if (typeof(args) == 'string'){
-        req_data['args'] = JSON.stringify(str2Obj(args));
+        req_data['args'] = JSON.stringify(toArrayObject(args));
     } else {
         req_data['args'] = JSON.stringify(args);
     }
@@ -128,35 +118,32 @@ function submitConf(version) {
     });
 }
 
-
-
-//php上传限制
-function phpUploadLimitReq(version){
-    phpPost('get_limit_conf', version, '', function(ret_data){
-        var rdata = $.parseJSON(ret_data.data);
-        phpUploadLimit(version,rdata['max']);
-    });
-}
-
-function phpUploadLimit(version,max){
-    var LimitCon = '<p class="conf_p"><input class="phpUploadLimit bt-input-text mr5" type="number" value="'+
-    max+'" name="max">MB<button class="btn btn-success btn-sm" onclick="setPHPMaxSize(\''+
-    version+'\')" style="margin-left:20px">保存</button></p>';
-    $(".soft-man-con").html(LimitCon);
-}
-
-
 //php超时限制
-function phpTimeLimitReq(version){
+function phpCommonFunc(version){
     phpPost('get_limit_conf', version, '', function(ret_data){
         var rdata = $.parseJSON(ret_data.data);
-        phpTimeLimit(version,rdata['maxTime']);
-    });
-}
+        var con = '<p class="conf_p">\
+            <span>超时限制</span>\
+            <input class="phpTimeLimit bt-input-text mr5" type="number" value="' + rdata['maxTime'] + '">, 秒\
+            <button class="btn btn-success btn-sm" onclick="setPHPMaxTime(\'' + version + '\')" style="margin-left:20px">保存</button>\
+            </p>';
 
-function phpTimeLimit(version, max) {
-    var LimitCon = '<p class="conf_p"><input class="phpTimeLimit bt-input-text mr5" type="number" value="' + max + '">秒<button class="btn btn-success btn-sm" onclick="setPHPMaxTime(\'' + version + '\')" style="margin-left:20px">保存</button></p>';
-    $(".soft-man-con").html(LimitCon);
+        con += '<p class="conf_p">\
+            <span>上传限制</span>\
+            <input class="phpUploadLimit bt-input-text mr5" type="number" value="' + rdata['max']+'" name="max">,MB\
+            <button class="btn btn-success btn-sm" onclick="setPHPMaxSize(\''+ version+'\')" style="margin-left:20px">保存</button>\
+        </p>';
+
+        // <button class="btn btn-default btn-sm" onclick="phpPreload(\'' + version + '\')">预加载脚本</button>\
+        con += '<hr/><p class="conf_p" style="text-align:center;">\
+            <button class="btn btn-default btn-sm" onclick="getPHPInfo(\'' + version + '\')">查看phpinfo()</button>\
+            <button class="btn btn-default btn-sm" onclick="phpPreload(\'' + version + '\')">预加载脚本</button>\
+            <button class="btn btn-default btn-sm" onclick="phpOpcacheBlacklist(\'' + version + '\')">OPCACHE黑名单</button>\
+            <button class="btn btn-default btn-sm" onclick="phpFpmRoot(\'' + version + '\')">PHP-FPM(global)</button>\
+        </p>';
+
+        $(".soft-man-con").html(con);
+    });
 }
 
 //设置超时限制
@@ -164,7 +151,10 @@ function setPHPMaxTime(version) {
     var max = $(".phpTimeLimit").val();
     phpPost('set_max_time',version,{'time':max},function(data){
         var rdata = $.parseJSON(data.data);
-        layer.msg(rdata.msg, { icon: rdata.status ? 1 : 2 });
+        showMsg(rdata.msg,function(){
+            phpCommonFunc(version);
+        },{ icon: rdata.status ? 1 : 2 });
+
     });
 }
 //设置PHP上传限制
@@ -182,6 +172,24 @@ function setPHPMaxSize(version) {
     });
 }
 
+function phpPreload(version){
+    phpPost('app_start',version,{},function(data){
+        onlineEditFile(0, data['data']);
+    });
+}
+
+function phpOpcacheBlacklist(version){
+    phpPost('opcache_blacklist_file',version,{},function(data){
+        onlineEditFile(0, data['data']);
+    });
+}
+
+function phpFpmRoot(version){
+    phpPost('get_fpm_file',version,{},function(data){
+        onlineEditFile(0, data['data']);
+    });
+}
+
 
 function getFpmConfig(version){
     phpPost('get_fpm_conf', version, {}, function(data){
@@ -194,8 +202,9 @@ function getFpmConfig(version){
             "<option value='3' " + (rdata.max_children == 100 ? 'selected' : '') + ">100并发</option>" +
             "<option value='4' " + (rdata.max_children == 200 ? 'selected' : '') + ">200并发</option>" +
             "<option value='5' " + (rdata.max_children == 300 ? 'selected' : '') + ">300并发</option>" +
-            "<option value='6' " + (rdata.max_children == 500 ? 'selected' : '') + ">500并发</option>"
-        var pms = [{ 'name': 'static', 'title': '静态' }, { 'name': 'dynamic', 'title': '动态' }];
+            "<option value='6' " + (rdata.max_children == 500 ? 'selected' : '') + ">500并发</option>" +
+            "<option value='7' " + (rdata.max_children == 2000 ? 'selected' : '') + ">2000并发</option>";
+        var pms = [{ 'name': 'static', 'title': '静态' }, { 'name': 'dynamic', 'title': '动态' },{ 'name': 'ondemand', 'title': '按需' }];
         var pmList = '';
         for (var i = 0; i < pms.length; i++) {
             pmList += '<option value="' + pms[i].name + '" ' + ((pms[i].name == rdata.pm) ? 'selected' : '') + '>' + pms[i].title + '</option>';
@@ -248,11 +257,11 @@ function getFpmConfig(version){
                     min_spare_servers = 30;
                     max_spare_servers = 180;
                     break;
-                case '6':
-                    max_children = 500;
-                    start_servers = 35;
-                    min_spare_servers = 35;
-                    max_spare_servers = 250;
+                case '7':
+                    max_children = 2000;
+                    start_servers = 40;
+                    min_spare_servers = 40;
+                    max_spare_servers = 255;
                     break;
             }
 
@@ -320,9 +329,19 @@ function getFpmStatus(version){
         }
 
         var rdata = tmp_data.data;
+        var php_fpm_status = '动态';
+        if (rdata['process manager'] == 'dynamic'){
+            php_fpm_status = '动态';
+        } else if(rdata['process manager'] == 'static'){
+            php_fpm_status = '静态';
+        } else if(rdata['process manager'] == 'ondemand'){
+            php_fpm_status = '按需';
+        }
+
+        
         var con = "<div style='height:420px;overflow:hidden;'><table class='table table-hover table-bordered GetPHPStatus' style='margin:0;padding:0'>\
                         <tr><th>应用池(pool)</th><td>" + rdata.pool + "</td></tr>\
-                        <tr><th>进程管理方式(process manager)</th><td>" + ((rdata['process manager'] == 'dynamic') ? '动态' : '静态') + "</td></tr>\
+                        <tr><th>进程管理方式(process manager)</th><td>" + php_fpm_status + "</td></tr>\
                         <tr><th>启动日期(start time)</th><td>" + rdata['start time'] + "</td></tr>\
                         <tr><th>请求数(accepted conn)</th><td>" + rdata['accepted conn'] + "</td></tr>\
                         <tr><th>请求队列(listen queue)</th><td>" + rdata['listen queue'] + "</td></tr>\
@@ -658,7 +677,7 @@ function phpLibConfig(version){
 
 //安装扩展
 function installPHPLib(version, name, title, pathinfo) {
-    layer.confirm('您真的要安装{1}吗?'.replace('{1}', name), { icon: 3, closeBtn: 2 }, function() {
+    layer.confirm('您真的要卸载{1}吗?'.replace('{1}', name), { icon: 3, closeBtn: 2 }, function() {
         name = name.toLowerCase();
         var data = "name=" + name + "&version=" + version + "&type=1";
 

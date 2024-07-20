@@ -1,6 +1,6 @@
 #!/bin/bash
-PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
-export PATH
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
+export PATH=$PATH:/opt/homebrew/bin
 
 curPath=`pwd`
 rootPath=$(dirname "$curPath")
@@ -9,8 +9,7 @@ serverPath=$(dirname "$rootPath")
 sourcePath=${serverPath}/source
 sysName=`uname`
 install_tmp=${rootPath}/tmp/mw_install.pl
-
-
+SYS_ARCH=`arch`
 
 version=5.2.17
 PHP_VER=52
@@ -24,6 +23,22 @@ mkdir -p $serverPath/php
 cd ${rootPath}/plugins/php/lib && /bin/bash zlib.sh
 
 if [ ! -d $sourcePath/php/php${PHP_VER} ];then
+	
+	# ----------------------------------------------------------------------- #
+	# 中国优化安装
+	cn=$(curl -fsSL -m 10 -s http://ipinfo.io/json | grep "\"country\": \"CN\"")
+	LOCAL_ADDR=common
+	if [ ! -z "$cn" ] || [ "$?" == "0" ] ;then
+		LOCAL_ADDR=cn
+	fi
+
+	if [ "$LOCAL_ADDR" == "cn" ];then
+		if [ ! -f $sourcePath/php/php-${version}.tar.xz ];then
+			wget --no-check-certificate -O $sourcePath/php/php-${version}.tar.xz https://mirrors.sohu.com/php/php-${version}.tar.xz
+		fi
+	fi
+	# ----------------------------------------------------------------------- #
+
 	if [ ! -f $sourcePath/php/php-${version}.tar.gz ];then
 		wget --no-check-certificate -O $sourcePath/php/php-${version}.tar.gz https://museum.php.net/php5/php-${version}.tar.gz
 	fi
@@ -83,6 +98,10 @@ fi
 IS_64BIT=`getconf LONG_BIT`
 if [ "$IS_64BIT" == "64" ];then
 	OPTIONS="${OPTIONS} --with-libdir=lib64"
+fi
+
+if [ "${SYS_ARCH}" == "aarch64" ];then
+	OPTIONS="$OPTIONS --build=aarch64-unknown-linux-gnu --host=aarch64-unknown-linux-gnu"
 fi
 
 

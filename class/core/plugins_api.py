@@ -27,7 +27,7 @@ import sys
 import threading
 import multiprocessing
 
-
+from flask import render_template
 from flask import request
 
 
@@ -52,6 +52,7 @@ class plugins_api:
     __plugin_dir = 'plugins'
     __type = 'data/json/type.json'
     __index = 'data/json/index.json'
+    __index_data = None
     setupPath = None
 
     def __init__(self):
@@ -59,6 +60,14 @@ class plugins_api:
         self.__plugin_dir = mw.getRunDir() + '/plugins'
         self.__type = mw.getRunDir() + '/data/json/type.json'
         self.__index = mw.getRunDir() + '/data/json/index.json'
+
+        self.initIndexData()
+
+    def initIndexData(self):
+        if not os.path.exists(self.__index):
+            mw.writeFile(self.__index, '[]')
+
+        self.__index_data = json.loads(mw.readFile(self.__index))
 
     ##### ----- start ----- ###
     def listApi(self):
@@ -71,9 +80,32 @@ class plugins_api:
         if not mw.isNumber(sType):
             sType = 0
 
-        # print sPage
-        data = self.getPluginList(sType, int(sPage))
+        # print(sPage, sType)
+        search = request.args.get('search', '').lower()
+        data = self.getPluginList(sType, search, int(sPage))
         return mw.getJson(data)
+
+    def menuGetAbsPath(self, tag, path):
+        if path[0:1] == '/':
+            return path
+        else:
+            return mw.getPluginDir() + '/' + tag + '/' + path
+
+    def menuApi(self):
+        import config_api
+        data = config_api.config_api().get()
+        tag = request.args.get('tag', '')
+        menu_file = 'data/hook_menu.json'
+        content = ''
+        if os.path.exists(menu_file):
+            t = mw.readFile(menu_file)
+            tlist = json.loads(t)
+            for menu_data in tlist:
+                if tag == menu_data['name'] and 'path' in menu_data:
+                    tpath = self.menuGetAbsPath(tag, menu_data['path'])
+                    content = mw.readFile(tpath)
+        data['plugin_content'] = content
+        return render_template('plugin_menu.html', data=data)
 
     def fileApi(self):
         name = request.args.get('name', '')
@@ -81,6 +113,7 @@ class plugins_api:
             return ''
 
         f = request.args.get('f', '')
+
         if f.strip() == '':
             return ''
 
@@ -88,8 +121,16 @@ class plugins_api:
         if not os.path.exists(file):
             return ''
 
-        c = open(file, 'rb').read()
-        return c
+        suffix = mw.getPathSuffix(file)
+        if suffix == '.css':
+            content = mw.readFile(file)
+            from flask import Response
+            from flask import make_response
+            v = Response(content, headers={
+                         'Content-Type': 'text/css; charset="utf-8"'})
+            return make_response(v)
+        content = open(file, 'rb').read()
+        return content
 
     def indexListApi(self):
         data = self.getIndexList()
@@ -107,7 +148,7 @@ class plugins_api:
     def initApi(self):
 
         plugin_names = {
-            'openresty': '1.21.4.1',
+            'openresty': '1.25.3.1',
             'php': '56',
             'swap': '1.1',
             'mysql': '5.7',
@@ -214,10 +255,7 @@ class plugins_api:
                 isNeedAdd = False
 
         if isNeedAdd:
-            tmp = {}
-            tmp['title'] = info['title']
-            tmp['name'] = info['name']
-            data.append(tmp)
+            data.append(info)
         mw.writeFile(hookPath, json.dumps(data))
 
     def hookUninstallFile(self, hook_name, info):
@@ -228,26 +266,45 @@ class plugins_api:
             data = json.loads(t)
 
         for idx in range(len(data)):
-            if data[idx]['title'] == info['title'] and data[idx]['name'] == info['name']:
+            if data[idx]['name'] == info['name']:
                 data.remove(data[idx])
+                break
         mw.writeFile(hookPath, json.dumps(data))
 
     def hookInstall(self, info):
+        valid_hook = ['backup', 'database']
+        valid_list_hook = ['menu', 'global_static', 'site_cb']
         if 'hook' in info:
             hooks = info['hook']
-            for x in hooks:
-                if x in ['backup', 'database']:
-                    self.hookInstallFile(x, info)
-                    return True
+            for h in hooks:
+                hooks_type = type(h)
+                if hooks_type == dict:
+                    tag = h['tag']
+                    if tag in valid_list_hook:
+                        self.hookInstallFile(tag, h[tag])
+                elif hooks_type == str:
+                    for x in hooks:
+                        if x in valid_hook:
+                            self.hookInstallFile(x, info)
+                            return True
         return False
 
     def hookUninstall(self, info):
+        valid_hook = ['backup', 'database']
+        valid_list_hook = ['menu', 'global_static', 'site_cb']
         if 'hook' in info:
             hooks = info['hook']
-            for x in hooks:
-                if x in ['backup', 'database']:
-                    self.hookUninstallFile(x, info)
-                    return True
+            for h in hooks:
+                hooks_type = type(h)
+                if hooks_type == dict:
+                    tag = h['tag']
+                    if tag in valid_list_hook:
+                        self.hookUninstallFile(tag, h[tag])
+                elif hooks_type == str:
+                    for x in hooks:
+                        if x in valid_hook:
+                            self.hookUninstallFile(x, info)
+                            return True
         return False
 
     def uninstallOldApi(self):
@@ -567,20 +624,37 @@ class plugins_api:
 
         return plugins_info
 
-    def checkDisplayIndex(self, name, version):
-        if not os.path.exists(self.__index):
-            mw.writeFile(self.__index, '[]')
+    def checkIndexList(self, name, version):
+        indexList = self.__index_data
+        for i in indexList:
+            nv = i.split('-')
+            if nv[0] == name:
+                return True
+        return False
 
-        indexList = json.loads(mw.readFile(self.__index))
-        if type(version) == list:
-            for index in range(len(version)):
-                vname = name + '-' + version[index]
+    def checkDisplayIndex(self, name, version, coexist):
+        # if not os.path.exists(self.__index):
+        #     mw.writeFile(self.__index, '[]')
+        # indexList = json.loads(mw.readFile(self.__index))
+
+        indexList = self.__index_data
+        if coexist:
+            if type(version) == list:
+                for index in range(len(version)):
+                    vname = name + '-' + version[index]
+                    if vname in indexList:
+                        return True
+            else:
+                vname = name + '-' + version
                 if vname in indexList:
                     return True
+
         else:
-            vname = name + '-' + version
-            if vname in indexList:
-                return True
+            if type(version) == list:
+                for index in range(len(version)):
+                    return self.checkIndexList(name, version)
+            else:
+                return self.checkIndexList(name, version)
         return False
 
     def getVersion(self, path):
@@ -647,7 +721,7 @@ class plugins_api:
         pInfo['task'] = self.checkSetupTask(
             pInfo['name'], info['versions'], coexist)
         pInfo['display'] = self.checkDisplayIndex(
-            info['name'], pInfo['versions'])
+            info['name'], pInfo['versions'], coexist)
 
         pInfo['setup'] = os.path.exists(pInfo['install_checks'])
 
@@ -681,6 +755,7 @@ class plugins_api:
     def makeList(self, data, sType='0'):
         plugins_info = []
 
+        # 相应类型
         if (data['pid'] == sType):
             if type(data['versions']) == list and 'coexist' in data and data['coexist']:
                 tmp_data = self.makeCoexist(data)
@@ -691,6 +766,7 @@ class plugins_api:
                 plugins_info.append(pg)
             return plugins_info
 
+        # 全部
         if sType == '0':
             if type(data['versions']) == list and 'coexist' in data and data['coexist']:
                 tmp_data = self.makeCoexist(data)
@@ -699,6 +775,18 @@ class plugins_api:
             else:
                 pg = self.getPluginInfo(data)
                 plugins_info.append(pg)
+
+        # 已经安装
+        if sType == '-1':
+            if type(data['versions']) == list and 'coexist' in data and data['coexist']:
+                tmp_data = self.makeCoexist(data)
+                for index in range(len(tmp_data)):
+                    if tmp_data[index]['setup']:
+                        plugins_info.append(tmp_data[index])
+            else:
+                pg = self.getPluginInfo(data)
+                if pg['setup']:
+                    plugins_info.append(pg)
 
         # print plugins_info, data
         return plugins_info
@@ -720,22 +808,36 @@ class plugins_api:
                     print(e)
         return plugins_info
 
-    def getAllListPage(self, sType='0', page=1, pageSize=10):
+    def searchKey(self, info, kw):
+        try:
+            if info['title'].lower().find(kw) > -1:
+                return True
+            if info['ps'].lower().find(kw) > -1:
+                return True
+            if info['name'].lower().find(kw) > -1:
+                return True
+        except Exception as e:
+            return False
+
+    def getAllListPage(self, sType='0', kw='', page=1, pageSize=10):
         plugins_info = []
         for dirinfo in os.listdir(self.__plugin_dir):
             if dirinfo[0:1] == '.':
                 continue
             path = self.__plugin_dir + '/' + dirinfo
             if os.path.isdir(path):
-                json_file = path + '/info.json'
-                if os.path.exists(json_file):
+                info_file = path + '/info.json'
+                if os.path.exists(info_file):
                     try:
-                        data = json.loads(mw.readFile(json_file))
+                        data = json.loads(mw.readFile(info_file))
+                        # 判断是否搜索
+                        if kw != '' and not self.searchKey(data, kw):
+                            continue
                         tmp_data = self.makeList(data, sType)
                         for index in range(len(tmp_data)):
                             plugins_info.append(tmp_data[index])
                     except Exception as e:
-                        print(e)
+                        print(mw.getTracebackInfo())
 
         start = (page - 1) * pageSize
         end = start + pageSize
@@ -865,14 +967,14 @@ class plugins_api:
 
         return plugins_info
 
-    def getPluginList(self, sType, sPage=1, sPageSize=10):
-        # print sType, sPage, sPageSize
+    def getPluginList(self, sType,  kw='', sPage=1, sPageSize=10):
+        # print(sType, kw, sPage, sPageSize)
 
         ret = {}
         ret['type'] = json.loads(mw.readFile(self.__type))
         # plugins_info = self.getAllListThread(sType)
         # plugins_info = self.getAllListProcess(sType)
-        data = self.getAllListPage(sType, sPage, sPageSize)
+        data = self.getAllListPage(sType, kw, sPage,  sPageSize)
         ret['data'] = data[0]
 
         args = {}
@@ -900,19 +1002,24 @@ class plugins_api:
                 plugin_name = '-'.join(tmpArr)
                 plugin_ver = tmp[tmp_len - 1]
 
-            json_file = self.__plugin_dir + '/' + plugin_name + '/info.json'
-            if os.path.exists(json_file):
-                content = mw.readFile(json_file)
+            read_json_file = self.__plugin_dir + '/' + plugin_name + '/info.json'
+            if os.path.exists(read_json_file):
+                content = mw.readFile(read_json_file)
                 try:
                     data = json.loads(content)
                     data = self.makeList(data)
                     for index in range(len(data)):
-                        if data[index]['versions'] == plugin_ver or plugin_ver in data[index]['versions']:
+                        if data[index]['coexist']:
+                            if data[index]['versions'] == plugin_ver or plugin_ver in data[index]['versions']:
+                                data[index]['display'] = True
+                                plist.append(data[index])
+                                continue
+                        else:
                             data[index]['display'] = True
                             plist.append(data[index])
-                            continue
+
                 except Exception as e:
-                    print('getIndexList:', e)
+                    print('getIndexList:', mw.getTracebackInfo())
 
         # 使用gevent模式时,无法使用多进程
         # plist = self.checkStatusMProcess(plist)
@@ -954,8 +1061,11 @@ class plugins_api:
 
     # shell 调用
     def run(self, name, func, version='', args='', script='index'):
-        path = self.__plugin_dir + \
-            '/' + name + '/' + script + '.py'
+
+        path = self.__plugin_dir + '/' + name + '/' + script + '.py'
+        if not os.path.exists(path):
+            path = self.__plugin_dir + '/' + name + '/' + name + '.py'
+
         py = 'python3 ' + path
 
         if args == '':
@@ -980,9 +1090,15 @@ class plugins_api:
         if not os.path.exists(package):
             return (False, "插件不存在!")
 
-        sys.path.append(package)
+        if not package in sys.path:
+            sys.path.append(package)
         eval_str = "__import__('" + script + "')." + func + '(' + args + ')'
-        newRet = eval(eval_str)
+        newRet = None
+        try:
+            newRet = eval(eval_str)
+        except Exception as e:
+            print(mw.getTracebackInfo())
+        
         if mw.isDebugMode():
             print('callback', eval_str)
 

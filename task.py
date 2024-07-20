@@ -64,6 +64,29 @@ def service_cmd(method):
         return
 
 
+def openresty_cmd(method = 'reload'):
+    # 检查是否安装
+    odir = mw.getServerDir() + '/openresty'
+    if not os.path.exists(odir):
+        return False
+
+    # systemd
+    systemd = mw.systemdCfgDir()+'/openresty.service'
+    if os.path.exists(systemd):
+        execShell('systemctl ' + method + ' openresty')
+        return True
+
+    sys_initd = '/etc/init.d/openresty'
+    if os.path.exists(sys_initd):
+        os.system(sys_initd + ' ' + method)
+        return True
+
+    install_initd = mw.getServerDir()+'/openresty/init.d/openresty'
+    if os.path.exists(install_initd):
+        os.system(install_initd + ' ' + method)
+        return True
+    return False
+
 def mw_async(f):
     def wrapper(*args, **kwargs):
         thr = threading.Thread(target=f, args=args, kwargs=kwargs)
@@ -256,6 +279,13 @@ def systemTask():
             tmp = {}
             # 取当前CPU Io
             tmp['used'] = psutil.cpu_percent(interval=1)
+            if tmp['used'] > 80:
+                panel_title = mw.getConfig('title')
+                ip = mw.getHostAddr()
+                now_time = mw.getDateFromNow()
+                msg = now_time + '|节点[' + panel_title + ':' + ip + \
+                    ']处于高负载[' + str(tmp['used']) + '],请排查原因!'
+                mw.notifyMessage(msg, '面板监控', 600)
 
             if not cpuInfo:
                 tmp['mem'] = sm.getMemUsed()
@@ -386,8 +416,11 @@ def check502Task():
 
 def check502():
     try:
-        verlist = ['52', '53', '54', '55', '56', '70',
-                   '71', '72', '73', '74', '80', '81', '82']
+        verlist = [
+            '52', '53', '54', '55', '56', '70',
+            '71', '72', '73', '74', '80', '81', 
+            '82', '83'
+        ]
         for ver in verlist:
             sdir = mw.getServerDir()
             php_path = sdir + '/php/' + ver + '/sbin/php-fpm'
@@ -406,7 +439,6 @@ def check502():
 def startPHPVersion(version):
     sdir = mw.getServerDir()
     try:
-
         # system
         phpService = mw.systemdCfgDir() + '/php' + version + '.service'
         if os.path.exists(phpService):
@@ -433,11 +465,9 @@ def startPHPVersion(version):
         # 尝试重启服务
         cgi = '/tmp/php-cgi-' + version + '.sock'
         pid = sdir + '/php/' + version + '/var/run/php-fpm.pid'
-        data = mw.execShell("ps -ef | grep php/" + version +
-                            " | grep -v grep|grep -v python |awk '{print $2}'")
+        data = mw.execShell("ps -ef | grep php/" + version +" | grep -v grep|grep -v python |awk '{print $2}'")
         if data[0] != '':
-            os.system("ps -ef | grep php/" + version +
-                      " | grep -v grep|grep -v python |awk '{print $2}' | xargs kill ")
+            os.system("ps -ef | grep php/" + version + " | grep -v grep|grep -v python |awk '{print $2}' | xargs kill ")
         time.sleep(0.5)
         if not os.path.exists(cgi):
             os.system('rm -f ' + cgi)
@@ -500,21 +530,22 @@ def checkPHPVersion(version):
 
     # 检查Web服务是否启动
     if result.find('Connection refused') != -1:
-        global isTask
-        if os.path.exists(isTask):
-            isStatus = mw.readFile(isTask)
-            if isStatus == 'True':
-                return True
+        return False
+    #     global isTask
+    #     if os.path.exists(isTask):
+    #         isStatus = mw.readFile(isTask)
+    #         if isStatus == 'True':
+    #             return True
 
-        # systemd
-        systemd = mw.systemdCfgDir() + '/openresty.service'
-        if os.path.exists(systemd):
-            execShell('systemctl reload openresty')
-            return True
-        # initd
-        initd = '/etc/init.d/openresty'
-        if os.path.exists(initd):
-            os.system(initd + ' reload')
+    #     # systemd
+    #     systemd = mw.systemdCfgDir() + '/openresty.service'
+    #     if os.path.exists(systemd):
+    #         execShell('systemctl reload openresty')
+    #         return True
+    #     # initd
+    #     initd = '/etc/init.d/openresty'
+    #     if os.path.exists(initd):
+    #         os.system(initd + ' reload')
     return True
 
 # --------------------------------------PHP监控 end--------------------------------------------- #
@@ -531,19 +562,25 @@ def openrestyAutoRestart():
                 time.sleep(86400)
                 continue
 
-            # systemd
-            systemd = '/lib/systemd/system/openresty.service'
-            initd = '/etc/init.d/openresty'
-            if os.path.exists(systemd):
-                execShell('systemctl reload openresty')
-            elif os.path.exists(initd):
-                os.system(initd + ' reload')
+            openresty_cmd('reload')
             time.sleep(86400)
     except Exception as e:
         print(str(e))
         time.sleep(86400)
 
 # --------------------------------------OpenResty Auto Restart End   --------------------------------------------- #
+
+# ------------------------------------  OpenResty Restart At Once Start ------------------------------------------ #
+
+
+def openrestyRestartAtOnce():
+    restart_nginx_tip = 'data/restart_nginx.pl'
+    while True:
+        if os.path.exists(restart_nginx_tip):
+            os.remove(restart_nginx_tip)
+            openresty_cmd('reload')
+        time.sleep(1)
+# -----------------------------------   OpenResty Restart At Once End   ------------------------------------------ #
 
 
 # --------------------------------------Panel Restart Start   --------------------------------------------- #
@@ -576,10 +613,17 @@ if __name__ == "__main__":
     php502 = setDaemon(php502)
     php502.start()
 
+    # OpenResty Restart At Once Start
+    oraos = threading.Thread(target=openrestyRestartAtOnce)
+    oraos = setDaemon(oraos)
+    oraos.start()
+
+
     # OpenResty Auto Restart Start
     oar = threading.Thread(target=openrestyAutoRestart)
     oar = setDaemon(oar)
     oar.start()
+
 
     # Panel Restart Start
     rps = threading.Thread(target=restartPanelService)
